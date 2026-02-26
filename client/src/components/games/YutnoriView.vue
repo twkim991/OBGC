@@ -58,12 +58,23 @@
             🔥 윷을 던지세요!
           </h2>
           <h2 v-else-if="isMyTurn && gamePhase === 'moving'" class="my-turn blink">
-            👇 이동할 말을 선택하세요!
+            👇 말과 사용할 윷을 선택하세요!
           </h2>
           <h2 v-else>상대방 턴 대기 중...</h2>
 
-          <div class="result" v-if="lastThrowResult">
-            방금 나온 윷: <span class="badge">{{ lastThrowResult }}</span>
+          <div v-if="remainingThrows.length > 0" class="throw-stack">
+            <h4>보유한 윷 (클릭해서 선택)</h4>
+            <div class="stack-row">
+              <div
+                v-for="(steps, idx) in remainingThrows"
+                :key="idx"
+                class="stack-item"
+                :class="{ selected: selectedThrowIndex === idx && gamePhase === 'moving' }"
+                @click="gamePhase === 'moving' ? (selectedThrowIndex = idx) : null"
+              >
+                {{ getThrowName(steps) }}
+              </div>
+            </div>
           </div>
 
           <div v-if="isMyTurn" class="piece-selection">
@@ -131,6 +142,9 @@ const chatBox = ref(null);
 const gamePhase = ref('waiting');
 const selectedPieceIndex = ref(0); // 기본으로 첫 번째 말(0번) 선택
 const mySessionId = ref('');
+
+const remainingThrows = ref([]); // 서버에서 넘어올 스택 배열
+const selectedThrowIndex = ref(0); // 내가 소비할 스택의 인덱스
 
 // 내 말 4개만 쏙 뽑아오는 계산(Computed) 변수
 const myPieces = computed(() => {
@@ -208,15 +222,22 @@ onMounted(() => {
 
 const setupGame = () => {
   const connection = props.gameConnection;
-  mySessionId.value = connection.sessionId; // 🔥 내 세션 ID 저장
+  mySessionId.value = connection.sessionId;
 
   messages.value.push({ clientId: 'System', message: '윷놀이 방에 입장했습니다.' });
 
   connection.onStateChange((state) => {
     gameState.value = state.toJSON();
     currentTurnId.value = state.currentTurnId;
-    lastThrowResult.value = state.lastThrowResult;
-    gamePhase.value = state.gamePhase; // 🔥 현재 페이즈(던지기/이동) 동기화
+    gamePhase.value = state.gamePhase;
+
+    // 🔥 스택(탄창) 정보 실시간 동기화
+    remainingThrows.value = state.remainingThrows || [];
+
+    // 남은 스택이 바뀔 때마다 선택값을 0으로 안전하게 초기화
+    if (selectedThrowIndex.value >= remainingThrows.value.length) {
+      selectedThrowIndex.value = 0;
+    }
   });
 
   connection.onMessage('chat', (data) => {
@@ -232,9 +253,15 @@ const throwYut = () => {
 };
 
 // 🔥 이동하기 버튼을 눌렀을 때 호출될 함수
+// 🔥 서버에 보낼 때 pieceIndex와 throwIndex를 같이 묶어서 전송!
 const movePiece = () => {
   if (props.gameConnection && isMyTurn.value && gamePhase.value === 'moving') {
-    props.gameConnection.send('move_piece', selectedPieceIndex.value);
+    if (remainingThrows.value.length === 0) return;
+
+    props.gameConnection.send('move_piece', {
+      pieceIndex: selectedPieceIndex.value,
+      throwIndex: selectedThrowIndex.value,
+    });
   }
 };
 
@@ -251,6 +278,12 @@ const leave = () => {
 const scrollToBottom = async () => {
   await nextTick();
   if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+};
+
+// 숫자를 윷 이름으로 바꿔주는 헬퍼
+const getThrowName = (steps) => {
+  const map = { '-1': '빽도', 1: '도', 2: '개', 3: '걸', 4: '윷', 5: '모' };
+  return map[steps] || steps;
 };
 </script>
 
@@ -476,5 +509,37 @@ button[type='submit'] {
   stroke: #f1c40f !important;
   stroke-width: 2.5px !important;
   filter: drop-shadow(0 0 4px #f1c40f);
+}
+
+/* 장전된 윷 스택 스타일 */
+.throw-stack {
+  margin-top: 15px;
+  border-top: 2px dashed #eee;
+  padding-top: 15px;
+}
+.stack-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.stack-item {
+  background: #ecf0f1;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+.stack-item:hover {
+  border-color: #bdc3c7;
+}
+.stack-item.selected {
+  background: #34495e;
+  color: white;
+  border-color: #2c3e50;
+  transform: scale(1.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
 }
 </style>
