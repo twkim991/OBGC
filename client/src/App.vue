@@ -18,6 +18,7 @@
       :is="currentGameComponent"
       :gameConnection="roomConnection"
       @leave-game="handleLeaveRoom"
+      @move-to-game="handleMoveToGame"
     />
   </div>
 </template>
@@ -43,7 +44,7 @@ const roomConnection = ref(null);
 const currentGameComponent = computed(() => games[currentGameType.value] || null);
 
 onMounted(() => {
-  const endpoint = import.meta.env.DEV ? 'ws://localhost:3000' : `ws://${window.location.host}`;
+  const endpoint = import.meta.env.DEV ? 'ws://localhost:8002' : `ws://${window.location.host}`;
   colyseusClient.value = new Colyseus.Client(endpoint);
 });
 
@@ -62,19 +63,26 @@ const handleLeaveRoom = () => {
   currentView.value = 'lobby';
 };
 
-// 강제 이주(게임 시작) 신호를 받았을 때
+// 🔥 강제 이주 신호를 받았을 때 (대기실 가기 & 게임하러 가기 둘 다 처리!)
 const handleMoveToGame = async (data) => {
   if (roomConnection.value) {
-    roomConnection.value.leave(); // 기존 대기실 연결 종료
+    roomConnection.value.leave(); // 기존 방 연결 종료
   }
 
   try {
+    // 서버가 파준 새 방(새 대기실 or 새 게임방)으로 접속!
     roomConnection.value = await colyseusClient.value.joinById(data.roomId);
-    currentGameType.value = data.gameType;
-    currentView.value = 'game';
+
+    // 서버에서 보내준 gameType에 따라 화면 분기 처리
+    if (data.gameType === 'table') {
+      currentView.value = 'table'; // 🔥 대기실 화면으로 컴백!
+    } else {
+      currentGameType.value = data.gameType;
+      currentView.value = 'game'; // 기존처럼 게임 화면으로 진입
+    }
   } catch (error) {
-    console.error('게임방 이주 실패:', error);
-    handleLeaveRoom(); // 실패 시 로비로 복귀
+    console.error('방 이주 실패:', error);
+    handleLeaveRoom(); // 실패하면 쓸쓸히 로비로 쫓겨남
   }
 };
 </script>

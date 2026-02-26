@@ -1,5 +1,26 @@
 <template>
   <div class="game-screen yutnori">
+    <div v-if="gamePhase === 'finished'" class="game-over-overlay">
+      <div class="game-over-modal">
+        <template v-if="winnerSessionId === mySessionId">
+          <h1 class="win-title">🎉 완벽한 압승! 🎉</h1>
+          <p class="sub-text">상대방을 무참히 짓밟고 윷놀이를 제패하셨습니다.</p>
+        </template>
+
+        <template v-else>
+          <h1 class="lose-title">💀 처참한 패배... 💀</h1>
+          <p class="sub-text">
+            승리자: <strong>{{ winnerSessionId }}</strong>
+          </p>
+          <p class="sub-text">다음엔 꼭 복수하세요.</p>
+        </template>
+
+        <div class="action-buttons">
+          <button @click="returnToTable" class="return-btn">🔥 멤버 그대로 대기실 복귀</button>
+          <button @click="leave" class="leave-btn-small">파티 탈퇴 (로비로)</button>
+        </div>
+      </div>
+    </div>
     <div class="header">
       <h1>🎲 윷놀이 한 판!</h1>
       <button @click="leave" class="leave-btn">게임 포기</button>
@@ -61,6 +82,28 @@
             👇 말과 사용할 윷을 선택하세요!
           </h2>
           <h2 v-else>상대방 턴 대기 중...</h2>
+
+          <div v-if="mySkills.length > 0" class="skills-section">
+            <h4>✨ 내 보유 초능력 (1회용)</h4>
+            <div class="skills-row">
+              <div
+                v-for="skill in mySkills"
+                :key="skill"
+                class="skill-card"
+                :class="{
+                  disabled: !isMyTurn || gamePhase !== 'throwing',
+                  active: myActiveSkill === skill,
+                }"
+                @click="activateSkill(skill)"
+              >
+                <div class="skill-name">{{ skillInfo[skill].name }}</div>
+                <div class="skill-desc">{{ skillInfo[skill].desc }}</div>
+              </div>
+            </div>
+            <div v-if="myActiveSkill" class="active-skill-notice blink">
+              ⚡ [{{ skillInfo[myActiveSkill].name }}] 장전 완료! 어서 윷을 던지세요!
+            </div>
+          </div>
 
           <div v-if="remainingThrows.length > 0" class="throw-stack">
             <h4>보유한 윷 (클릭해서 선택)</h4>
@@ -130,7 +173,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue';
 
 const props = defineProps(['gameConnection']);
-const emit = defineEmits(['leave-game']);
+const emit = defineEmits(['leave-game', 'move-to-game']); // 🔥 'move-to-game' 이벤트 뚫어주기
 
 const gameState = ref(null); // 혹시 지워졌다면 다시 추가해줘!
 const currentTurnId = ref('');
@@ -140,11 +183,43 @@ const inputMessage = ref('');
 const chatBox = ref(null);
 
 const gamePhase = ref('waiting');
+const winnerSessionId = ref(''); // 🔥 승리자 ID 변수 추가
 const selectedPieceIndex = ref(0); // 기본으로 첫 번째 말(0번) 선택
 const mySessionId = ref('');
 
 const remainingThrows = ref([]); // 서버에서 넘어올 스택 배열
 const selectedThrowIndex = ref(0); // 내가 소비할 스택의 인덱스
+
+// 🔥 내 초능력 인벤토리 및 장전 상태 가져오기
+const mySkills = computed(() => {
+  if (!gameState.value || !mySessionId.value) return [];
+  const me = gameState.value.players[mySessionId.value];
+  return me ? me.skills : [];
+});
+
+const myActiveSkill = computed(() => {
+  if (!gameState.value || !mySessionId.value) return '';
+  const me = gameState.value.players[mySessionId.value];
+  return me ? me.activeSkill : '';
+});
+
+// 🔥 초능력 한글화 및 설명서 (도파민 폭발 텍스트)
+const skillInfo = {
+  MO_MAGNET: { name: '🧲 모 확정', desc: '다음 윷은 무조건 [모]가 터집니다.' },
+  DOUBLE_CAST: { name: '👯 복제 술법', desc: '다음 윷 결과를 2배로 복제합니다.' },
+  BACK_GEAR: { name: '⏪ 풀악셀 후진', desc: '다음 윷 숫자만큼 무자비하게 뒤로 갑니다.' },
+  EARTHQUAKE: { name: '💥 대지진', desc: '(즉발) 판 위의 모든 말을 대기실로 쳐박습니다.' },
+};
+
+// 🔥 서버로 스킬 발동(장전) 신호 쏘기
+const activateSkill = (skillId) => {
+  if (!isMyTurn.value || gamePhase.value !== 'throwing') {
+    return alert('초능력은 내 턴의 [윷 던지기] 직전에만 쓸 수 있습니다!');
+  }
+  if (props.gameConnection) {
+    props.gameConnection.send('activate_skill', skillId);
+  }
+};
 
 // 내 말 4개만 쏙 뽑아오는 계산(Computed) 변수
 const myPieces = computed(() => {
@@ -230,6 +305,7 @@ const setupGame = () => {
     gameState.value = state.toJSON();
     currentTurnId.value = state.currentTurnId;
     gamePhase.value = state.gamePhase;
+    winnerSessionId.value = state.winnerSessionId; // 🔥 승리자 정보 동기화
 
     // 🔥 스택(탄창) 정보 실시간 동기화
     remainingThrows.value = state.remainingThrows || [];
@@ -244,11 +320,23 @@ const setupGame = () => {
     messages.value.push(data);
     scrollToBottom();
   });
+
+  // 🔥 서버로부터 대기실 복귀(강제 이주) 명령 수신!
+  connection.onMessage('move_room', (data) => {
+    emit('move-to-game', data); // App.vue로 바통 터치!
+  });
 };
 
 const throwYut = () => {
   if (props.gameConnection && isMyTurn.value) {
     props.gameConnection.send('throw_yut');
+  }
+};
+
+// 방장이든 누구든 팝업에서 이 버튼을 누르면 서버에 복귀 신호를 보냄
+const returnToTable = () => {
+  if (props.gameConnection) {
+    props.gameConnection.send('return_to_table');
   }
 };
 
@@ -541,5 +629,149 @@ button[type='submit'] {
   border-color: #2c3e50;
   transform: scale(1.1);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+/* 🔥 게임 종료 팝업 스타일 */
+.game-over-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  backdrop-filter: blur(5px);
+}
+.game-over-modal {
+  background: white;
+  padding: 50px;
+  border-radius: 20px;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes popIn {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.win-title {
+  color: #f1c40f;
+  font-size: 2.5em;
+  margin-bottom: 10px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+.lose-title {
+  color: #e74c3c;
+  font-size: 2.5em;
+  margin-bottom: 10px;
+}
+.sub-text {
+  font-size: 1.2em;
+  color: #555;
+  margin-bottom: 30px;
+}
+.return-btn {
+  background: #34495e;
+  color: white;
+  border: none;
+  padding: 15px 30px;
+  font-size: 1.2em;
+  font-weight: bold;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.return-btn:hover {
+  background: #2c3e50;
+}
+/* 하단 CSS 쪽에 추가 */
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+}
+.leave-btn-small {
+  background: transparent;
+  color: #95a5a6;
+  border: 1px solid #bdc3c7;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.leave-btn-small:hover {
+  background: #ecf0f1;
+  color: #e74c3c;
+  border-color: #e74c3c;
+}
+
+/* ⚡ 초능력 카드 스타일 */
+.skills-section {
+  margin-top: 15px;
+  padding: 15px;
+  background: #2c3e50;
+  border-radius: 12px;
+  color: white;
+}
+.skills-section h4 {
+  margin: 0 0 10px 0;
+  color: #f1c40f;
+}
+.skills-row {
+  display: flex;
+  gap: 10px;
+}
+.skill-card {
+  flex: 1;
+  padding: 10px;
+  background: linear-gradient(135deg, #34495e, #2c3e50);
+  border: 2px solid #7f8c8d;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.skill-card:hover:not(.disabled) {
+  border-color: #f1c40f;
+  transform: translateY(-3px);
+  box-shadow: 0 5px 15px rgba(241, 196, 15, 0.3);
+}
+.skill-name {
+  font-weight: bold;
+  font-size: 1.1em;
+  margin-bottom: 5px;
+  color: #ecf0f1;
+}
+.skill-desc {
+  font-size: 0.75em;
+  color: #bdc3c7;
+  line-height: 1.3;
+}
+
+/* 스킬 장전 상태 / 비활성 상태 */
+.skill-card.active {
+  border-color: #e74c3c;
+  background: linear-gradient(135deg, #c0392b, #e74c3c);
+  box-shadow: 0 0 15px rgba(231, 76, 60, 0.6);
+}
+.skill-card.disabled {
+  opacity: 0.5;
+  filter: grayscale(100%);
+  cursor: not-allowed;
+}
+.active-skill-notice {
+  margin-top: 10px;
+  color: #e74c3c;
+  font-weight: bold;
+  font-size: 1.1em;
+  text-align: center;
 }
 </style>

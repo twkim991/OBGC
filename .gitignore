@@ -28,6 +28,7 @@ lerna-debug.log*
 /node_modules
 /server/dist
 /server/node_modules
+/server/client-dist
 
 # Logs
 logs
