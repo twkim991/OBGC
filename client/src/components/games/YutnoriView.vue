@@ -46,6 +46,18 @@
             <text :x="node.x" :y="node.y + 1" class="node-text">{{ index }}</text>
           </g>
 
+          <g v-if="gameState && gameState.titans" class="titans-layer">
+            <text
+              v-for="(titanPos, idx) in gameState.titans"
+              :key="'titan-' + idx"
+              :x="boardNodes[titanPos].x"
+              :y="boardNodes[titanPos].y"
+              class="titan-icon blink"
+            >
+              👹
+            </text>
+          </g>
+
           <g v-if="gameState" class="pieces-layer">
             <g
               v-for="(player, sessionId) in gameState.players"
@@ -64,6 +76,7 @@
                     {
                       highlighted:
                         isMyTurn && sessionId === mySessionId && pieceIdx === selectedPieceIndex,
+                      'stealth-active': piece.isStealth, // 🔥 2. 스텔스 클래스 동적 부여
                     },
                   ]"
                 />
@@ -127,7 +140,11 @@
                 v-for="(piece, idx) in myPieces"
                 :key="piece.id"
                 class="piece-selector"
-                :class="{ selected: selectedPieceIndex === idx, finished: piece.position === 99 }"
+                :class="{
+                  selected: selectedPieceIndex === idx,
+                  finished: piece.position === 99,
+                  'stealth-ui': piece.isStealth,
+                }"
                 @click="piece.position !== 99 ? (selectedPieceIndex = idx) : null"
               >
                 말 {{ idx + 1 }}
@@ -140,6 +157,7 @@
                         : `${piece.position}번칸`
                   }}
                 </div>
+                <div v-if="piece.isStealth" class="stealth-badge">👻 투명화</div>
               </div>
             </div>
           </div>
@@ -173,9 +191,9 @@
 import { ref, onMounted, computed, nextTick } from 'vue';
 
 const props = defineProps(['gameConnection']);
-const emit = defineEmits(['leave-game', 'move-to-game']); // 🔥 'move-to-game' 이벤트 뚫어주기
+const emit = defineEmits(['leave-game', 'move-to-game']);
 
-const gameState = ref(null); // 혹시 지워졌다면 다시 추가해줘!
+const gameState = ref(null);
 const currentTurnId = ref('');
 const lastThrowResult = ref('');
 const messages = ref([]);
@@ -183,14 +201,13 @@ const inputMessage = ref('');
 const chatBox = ref(null);
 
 const gamePhase = ref('waiting');
-const winnerSessionId = ref(''); // 🔥 승리자 ID 변수 추가
-const selectedPieceIndex = ref(0); // 기본으로 첫 번째 말(0번) 선택
+const winnerSessionId = ref('');
+const selectedPieceIndex = ref(0);
 const mySessionId = ref('');
 
-const remainingThrows = ref([]); // 서버에서 넘어올 스택 배열
-const selectedThrowIndex = ref(0); // 내가 소비할 스택의 인덱스
+const remainingThrows = ref([]);
+const selectedThrowIndex = ref(0);
 
-// 🔥 내 초능력 인벤토리 및 장전 상태 가져오기
 const mySkills = computed(() => {
   if (!gameState.value || !mySessionId.value) return [];
   const me = gameState.value.players[mySessionId.value];
@@ -203,15 +220,18 @@ const myActiveSkill = computed(() => {
   return me ? me.activeSkill : '';
 });
 
-// 🔥 초능력 한글화 및 설명서 (도파민 폭발 텍스트)
 const skillInfo = {
   MO_MAGNET: { name: '🧲 모 확정', desc: '다음 윷은 무조건 [모]가 터집니다.' },
   DOUBLE_CAST: { name: '👯 복제 술법', desc: '다음 윷 결과를 2배로 복제합니다.' },
   BACK_GEAR: { name: '⏪ 풀악셀 후진', desc: '다음 윷 숫자만큼 무자비하게 뒤로 갑니다.' },
   EARTHQUAKE: { name: '💥 대지진', desc: '(즉발) 판 위의 모든 말을 대기실로 쳐박습니다.' },
+  TITAN_DROP: { name: '👣 무지성거인 투하', desc: '(즉발) 빈 칸에 길막용 거인을 떨어뜨립니다.' },
+  STEALTH_MODE: {
+    name: '👻 스텔스 모드',
+    desc: '이번에 이동하는 말을 투명 상태(잡히지 않음)로 만듭니다.',
+  },
 };
 
-// 🔥 서버로 스킬 발동(장전) 신호 쏘기
 const activateSkill = (skillId) => {
   if (!isMyTurn.value || gamePhase.value !== 'throwing') {
     return alert('초능력은 내 턴의 [윷 던지기] 직전에만 쓸 수 있습니다!');
@@ -221,56 +241,44 @@ const activateSkill = (skillId) => {
   }
 };
 
-// 내 말 4개만 쏙 뽑아오는 계산(Computed) 변수
 const myPieces = computed(() => {
   if (!gameState.value || !mySessionId.value) return [];
   const me = gameState.value.players[mySessionId.value];
   return me ? me.pieces : [];
 });
 
-// 윷놀이판 29개 노드의 정확한 좌표 (0~100 기준 퍼센트)
 const boardNodes = [
-  // 우측 하단 (출발점) ~ 우측 상단 (0~5)
   { x: 90, y: 90 },
   { x: 90, y: 74 },
   { x: 90, y: 58 },
   { x: 90, y: 42 },
   { x: 90, y: 26 },
   { x: 90, y: 10 },
-  // 우측 상단 ~ 좌측 상단 (6~10)
   { x: 74, y: 10 },
   { x: 58, y: 10 },
   { x: 42, y: 10 },
   { x: 26, y: 10 },
   { x: 10, y: 10 },
-  // 좌측 상단 ~ 좌측 하단 (11~15)
   { x: 10, y: 26 },
   { x: 10, y: 42 },
   { x: 10, y: 58 },
   { x: 10, y: 74 },
   { x: 10, y: 90 },
-  // 좌측 하단 ~ 우측 하단 직전 (16~19)
   { x: 26, y: 90 },
   { x: 42, y: 90 },
   { x: 58, y: 90 },
   { x: 74, y: 90 },
-  // 대각선: 우측 상단 -> 정중앙 (20~21)
   { x: 76.6, y: 23.4 },
   { x: 63.3, y: 36.7 },
-  // 정중앙 (22)
   { x: 50, y: 50 },
-  // 대각선: 정중앙 -> 좌측 하단 (23~24)
   { x: 36.7, y: 63.3 },
   { x: 23.4, y: 76.6 },
-  // 대각선: 좌측 상단 -> 정중앙 (25~26)
   { x: 23.4, y: 23.4 },
   { x: 36.7, y: 36.7 },
-  // 대각선: 정중앙 -> 우측 하단 (27~28)
   { x: 63.3, y: 63.3 },
   { x: 76.6, y: 76.6 },
 ];
 
-// 말이 같은 칸에 있을 때 살짝 흩어지게 보이도록 위치 조정 (최대 4개)
 const getPieceX = (pos, index) => {
   if (pos === 99) return 0;
   return boardNodes[pos].x + (index % 2 === 0 ? -2 : 2);
@@ -280,11 +288,8 @@ const getPieceY = (pos, index) => {
   return boardNodes[pos].y + (index < 2 ? -2 : 2);
 };
 
-// 모서리와 중앙 노드를 강조하기 위한 헬퍼 함수
 const isCorner = (index) => [0, 5, 10, 15, 22].includes(index);
 
-// 현재 턴이 내 세션 ID와 일치하는지 계산
-// 내 턴인지 확인하는 computed도 수정
 const isMyTurn = computed(() => {
   return currentTurnId.value === props.gameConnection?.sessionId;
 });
@@ -305,12 +310,9 @@ const setupGame = () => {
     gameState.value = state.toJSON();
     currentTurnId.value = state.currentTurnId;
     gamePhase.value = state.gamePhase;
-    winnerSessionId.value = state.winnerSessionId; // 🔥 승리자 정보 동기화
+    winnerSessionId.value = state.winnerSessionId;
 
-    // 🔥 스택(탄창) 정보 실시간 동기화
     remainingThrows.value = state.remainingThrows || [];
-
-    // 남은 스택이 바뀔 때마다 선택값을 0으로 안전하게 초기화
     if (selectedThrowIndex.value >= remainingThrows.value.length) {
       selectedThrowIndex.value = 0;
     }
@@ -321,9 +323,8 @@ const setupGame = () => {
     scrollToBottom();
   });
 
-  // 🔥 서버로부터 대기실 복귀(강제 이주) 명령 수신!
   connection.onMessage('move_room', (data) => {
-    emit('move-to-game', data); // App.vue로 바통 터치!
+    emit('move-to-game', data);
   });
 };
 
@@ -333,15 +334,12 @@ const throwYut = () => {
   }
 };
 
-// 방장이든 누구든 팝업에서 이 버튼을 누르면 서버에 복귀 신호를 보냄
 const returnToTable = () => {
   if (props.gameConnection) {
     props.gameConnection.send('return_to_table');
   }
 };
 
-// 🔥 이동하기 버튼을 눌렀을 때 호출될 함수
-// 🔥 서버에 보낼 때 pieceIndex와 throwIndex를 같이 묶어서 전송!
 const movePiece = () => {
   if (props.gameConnection && isMyTurn.value && gamePhase.value === 'moving') {
     if (remainingThrows.value.length === 0) return;
@@ -368,7 +366,6 @@ const scrollToBottom = async () => {
   if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
 };
 
-// 숫자를 윷 이름으로 바꿔주는 헬퍼
 const getThrowName = (steps) => {
   const map = { '-1': '빽도', 1: '도', 2: '개', 3: '걸', 4: '윷', 5: '모' };
   return map[steps] || steps;
@@ -376,7 +373,7 @@ const getThrowName = (steps) => {
 </script>
 
 <style scoped>
-/* 윷놀이 전용 스타일 */
+/* 기존 스타일은 그대로 유지 */
 .game-screen {
   background: white;
   padding: 30px;
@@ -430,16 +427,6 @@ const getThrowName = (steps) => {
 .my-turn {
   color: #e74c3c;
 }
-.badge {
-  display: inline-block;
-  background: #34495e;
-  color: white;
-  padding: 5px 15px;
-  border-radius: 20px;
-  font-weight: bold;
-  font-size: 1.2em;
-  margin-top: 10px;
-}
 .throw-btn {
   background: #2ecc71;
   color: white;
@@ -488,6 +475,8 @@ button[type='submit'] {
   padding: 0 15px;
   border-radius: 4px;
 }
+
+/* SVG 보드판 스타일 */
 .yut-board-svg {
   width: 100%;
   max-width: 400px;
@@ -510,10 +499,10 @@ button[type='submit'] {
   fill: #f39c12;
   stroke: #e67e22;
   stroke-width: 1.5;
-} /* 출발점 강조 */
+}
 .corner-node {
   fill: #3498db;
-} /* 모서리(꺾이는 곳) 강조 */
+}
 .node-text {
   font-size: 3px;
   font-weight: bold;
@@ -522,7 +511,8 @@ button[type='submit'] {
   dominant-baseline: middle;
   pointer-events: none;
 }
-/* ... 기존 스타일 아래에 추가 ... */
+
+/* 말 스타일 */
 .player-piece {
   stroke: white;
   stroke-width: 0.8;
@@ -534,7 +524,30 @@ button[type='submit'] {
 .player-piece.blue {
   fill: #3498db;
 }
-/* 새로 추가된 말 선택 및 하이라이트 스타일 */
+.highlighted {
+  stroke: #f1c40f !important;
+  stroke-width: 2.5px !important;
+  filter: drop-shadow(0 0 4px #f1c40f);
+}
+
+/* 🔥 SVG 환경에 맞춘 무지성거인 아이콘 */
+.titan-icon {
+  font-size: 7px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.8));
+}
+
+/* 🔥 SVG 환경에 맞춘 스텔스 말 시각 효과 (반투명 + 점선 테두리) */
+.stealth-active {
+  opacity: 0.4;
+  stroke: #fff !important;
+  stroke-dasharray: 1 1;
+  stroke-width: 1.2px !important;
+}
+
+/* 말 선택기 스타일 */
 .piece-selection {
   margin-top: 15px;
   border-top: 2px dashed #eee;
@@ -553,6 +566,7 @@ button[type='submit'] {
   background: white;
   flex: 1;
   transition: all 0.2s;
+  position: relative;
 }
 .piece-selector:hover:not(.finished) {
   border-color: #3498db;
@@ -574,6 +588,16 @@ button[type='submit'] {
   color: #7f8c8d;
   margin-top: 4px;
 }
+.stealth-badge {
+  font-size: 0.7em;
+  color: #9b59b6;
+  font-weight: bold;
+  margin-top: 4px;
+}
+.piece-selector.stealth-ui {
+  border-color: #9b59b6;
+  background: #fdfaf6;
+}
 
 .move-btn {
   background: #9b59b6;
@@ -592,14 +616,6 @@ button[type='submit'] {
   box-shadow: none;
 }
 
-/* SVG 안에서 선택된 말 삐까뻔쩍하게 빛나기 */
-.highlighted {
-  stroke: #f1c40f !important;
-  stroke-width: 2.5px !important;
-  filter: drop-shadow(0 0 4px #f1c40f);
-}
-
-/* 장전된 윷 스택 스타일 */
 .throw-stack {
   margin-top: 15px;
   border-top: 2px dashed #eee;
@@ -630,7 +646,7 @@ button[type='submit'] {
   transform: scale(1.1);
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
 }
-/* 🔥 게임 종료 팝업 스타일 */
+
 .game-over-overlay {
   position: fixed;
   top: 0;
@@ -692,7 +708,6 @@ button[type='submit'] {
 .return-btn:hover {
   background: #2c3e50;
 }
-/* 하단 CSS 쪽에 추가 */
 .action-buttons {
   display: flex;
   flex-direction: column;
@@ -714,7 +729,6 @@ button[type='submit'] {
   border-color: #e74c3c;
 }
 
-/* ⚡ 초능력 카드 스타일 */
 .skills-section {
   margin-top: 15px;
   padding: 15px;
@@ -755,8 +769,6 @@ button[type='submit'] {
   color: #bdc3c7;
   line-height: 1.3;
 }
-
-/* 스킬 장전 상태 / 비활성 상태 */
 .skill-card.active {
   border-color: #e74c3c;
   background: linear-gradient(135deg, #c0392b, #e74c3c);
