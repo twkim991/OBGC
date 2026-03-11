@@ -33,7 +33,7 @@ import TableRoomView from './components/TableRoomView.vue';
 // 동적 컴포넌트 로딩 (게임이 추가될 때마다 여기에 등록)
 const games = {
   yutnori: defineAsyncComponent(() => import('./components/games/YutnoriView.vue')),
-  onecard: defineAsyncComponent(() => import('./components/games/OneCardView.vue')),
+  onecard: defineAsyncComponent(() => import('./components/games/MapleOneCardView.vue')),
 };
 
 const currentView = ref('lobby'); // 'lobby', 'table', 'game'
