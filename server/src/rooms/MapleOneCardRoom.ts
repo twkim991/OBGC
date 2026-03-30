@@ -1,3 +1,4 @@
+// server\src\rooms\MapleOneCardRoom.ts
 import { Room, Client, matchMaker } from 'colyseus';
 import { Schema, MapSchema, ArraySchema, type } from '@colyseus/schema';
 
@@ -376,9 +377,6 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
     // 첫 카드면 허용
     if (!top) return true;
-
-    // 색깔 바꾸기 카드는 언제든 가능
-    if (card.type === 'wild') return true;
 
     // 현재 색상 일치
     if (card.color === this.state.currentColor) return true;

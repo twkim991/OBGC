@@ -57,9 +57,6 @@ export function canPlayCard(
   // 첫 카드면 대부분 허용
   if (!topCard) return true;
 
-  // 색깔 바꾸기 카드는 언제든 가능
-  if (card.type === 'wild') return true;
-
   // 현재 색상 일치
   if (card.color === state.currentColor) return true;
 

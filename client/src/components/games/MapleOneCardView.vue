@@ -85,8 +85,14 @@
     </section>
 
     <section class="controls">
-      <button v-if="state?.gamePhase === 'waiting'" class="primary-btn" @click="startGame">게임 시작</button>
-      <button v-if="state?.gamePhase === 'playing' && isMyTurn" class="accent-btn" @click="drawCard">
+      <button v-if="state?.gamePhase === 'waiting'" class="primary-btn" @click="startGame">
+        게임 시작
+      </button>
+      <button
+        v-if="state?.gamePhase === 'playing' && isMyTurn"
+        class="accent-btn"
+        @click="drawCard"
+      >
         {{ state?.pendingAttack > 0 ? `${state.pendingAttack}장 받기` : '카드 1장 뽑기' }}
       </button>
     </section>
@@ -233,7 +239,6 @@ function canPlay(card) {
 
   if (card.type === 'ikart') return true;
   if (!top) return true;
-  if (card.type === 'wild') return true;
   if (card.color === state.value.currentColor) return true;
 
   if (card.type === 'number' && top.type === 'number' && card.number === top.number) {
@@ -524,7 +529,9 @@ p {
   justify-content: space-between;
   text-align: left;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .card-btn.playable:not(:disabled):hover {
