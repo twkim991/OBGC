@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -13,7 +11,5 @@ import { join } from 'path';
       exclude: ['/api/(.*)'], // API 경로는 프론트 화면 대신 백엔드가 처리하도록 예외 처리
     }),
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}
