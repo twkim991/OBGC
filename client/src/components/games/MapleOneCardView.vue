@@ -95,7 +95,14 @@
       >
         {{ state?.pendingAttack > 0 ? `${state.pendingAttack}장 받기` : '카드 1장 뽑기' }}
       </button>
+      <button class="secondary-btn" @click="toggleBgm">
+        {{ isBgmEnabled ? '브금 끄기' : '브금 켜기' }}
+      </button>
     </section>
+
+    <p v-if="bgmError" class="bgm-error">{{ bgmError }}</p>
+
+    <audio ref="audioRef" loop preload="auto" src="/audio/maple-onecard-bgm.mp3" />
 
     <section v-if="showColorPicker" class="color-picker">
       <p>색을 선택하세요</p>
@@ -127,7 +134,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 
 const props = defineProps({
   gameConnection: { type: Object, required: true },
@@ -140,6 +147,9 @@ const state = ref(null);
 const pendingCard = ref(null);
 const showColorPicker = ref(false);
 const messages = ref([]);
+const audioRef = ref(null);
+const isBgmEnabled = ref(true);
+const bgmError = ref('');
 
 let boundRoomId = '';
 
@@ -279,6 +289,7 @@ function canPlay(card) {
 
 function startGame() {
   if (!room.value) return;
+  tryPlayBgm();
   room.value.send('start_game');
 }
 
@@ -289,6 +300,7 @@ function drawCard() {
 
 function onClickCard(card) {
   if (!room.value) return;
+  tryPlayBgm();
 
   if (card.type === 'wild' || card.type === 'irina') {
     pendingCard.value = card;
@@ -301,6 +313,7 @@ function onClickCard(card) {
 
 function submitSelectedCard(color) {
   if (!room.value || !pendingCard.value) return;
+  tryPlayBgm();
 
   room.value.send('play_card', {
     cardId: pendingCard.value.id,
@@ -310,6 +323,56 @@ function submitSelectedCard(color) {
   pendingCard.value = null;
   showColorPicker.value = false;
 }
+
+async function tryPlayBgm() {
+  if (!isBgmEnabled.value || !audioRef.value) return;
+
+  try {
+    await audioRef.value.play();
+    bgmError.value = '';
+  } catch {
+    bgmError.value = '브라우저 정책으로 자동 재생이 차단될 수 있어요. 버튼을 한 번 더 눌러 주세요.';
+  }
+}
+
+function toggleBgm() {
+  isBgmEnabled.value = !isBgmEnabled.value;
+  bgmError.value = '';
+
+  if (!audioRef.value) return;
+
+  if (isBgmEnabled.value) {
+    tryPlayBgm();
+    return;
+  }
+
+  audioRef.value.pause();
+  audioRef.value.currentTime = 0;
+}
+
+function onAudioLoadError() {
+  bgmError.value = '브금 파일을 찾을 수 없어요. /client/public/audio/maple-onecard-bgm.mp3 경로를 확인해 주세요.';
+}
+
+onMounted(() => {
+  const unlockAudio = () => {
+    tryPlayBgm();
+  };
+
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+  document.addEventListener('keydown', unlockAudio, { once: true });
+
+  if (audioRef.value) {
+    audioRef.value.addEventListener('error', onAudioLoadError);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (audioRef.value) {
+    audioRef.value.pause();
+    audioRef.value.removeEventListener('error', onAudioLoadError);
+  }
+});
 </script>
 
 <style scoped>
@@ -622,6 +685,7 @@ function submitSelectedCard(color) {
 
 .primary-btn,
 .accent-btn,
+.secondary-btn,
 .pick-btn {
   border: 1px solid rgba(150, 119, 63, 0.28);
   border-radius: 12px;
@@ -643,11 +707,23 @@ function submitSelectedCard(color) {
   color: #4a3922;
 }
 
+.secondary-btn {
+  background: linear-gradient(180deg, #f8f4ea, #e6d7be);
+  color: #4a3922;
+}
+
 .primary-btn:disabled,
 .accent-btn:disabled,
+.secondary-btn:disabled,
 .pick-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.bgm-error {
+  margin: 0;
+  color: #8a4a2c;
+  font-size: 13px;
 }
 
 .color-picker {
