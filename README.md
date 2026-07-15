@@ -86,7 +86,96 @@ npm run lint
 npm run build
 ```
 
-## 6) 새 보드게임 추가(확장) 가이드
+## 6) Cafe24 Node.js 호스팅 배포
+
+### 배포 저장소 구조
+
+개발 소스와 Cafe24 실행 산출물은 서로 다른 Git 저장소로 관리합니다.
+
+- 개발 저장소: `C:\WORK\OBGC`
+- Cafe24 배포 저장소: `C:\WORK\bis2203_obgc`
+- Cafe24 진입점: 배포 저장소 루트의 `web.js`
+- 서버 빌드: `dist`
+- 프론트 빌드: `client-dist`
+
+`client-dist`는 NestJS `ServeStaticModule`에서 사용하는 고정 경로입니다. 과거 오타인
+`clinet-dist`를 다시 만들거나 배포 대상으로 사용하지 마세요.
+
+### 배포 산출물 준비
+
+PowerShell에서 개발 저장소 루트를 기준으로 실행합니다.
+
+```powershell
+cd C:\WORK\OBGC
+.\scripts\prepare-cafe24.ps1
+```
+
+스크립트는 다음 작업을 순서대로 수행합니다.
+
+1. 개발·배포 저장소가 Git 저장소이며 변경사항이 없는지 확인
+2. Vue 클라이언트와 NestJS 서버 빌드
+3. 이전 빌드 폴더를 제거하고 `client-dist`, `dist`를 완전 동기화
+4. `web.js`, `package.json`, `package-lock.json` 복사
+5. 배포 저장소에 운영 의존성만 설치
+6. 배포본의 원본 커밋을 `SOURCE_COMMIT`에 기록
+
+처음 실행하거나 의존성이 변경된 경우 개발 의존성도 다시 설치합니다.
+
+```powershell
+.\scripts\prepare-cafe24.ps1 -InstallSourceDependencies
+```
+
+배포 저장소의 기존 운영 `node_modules`를 그대로 유지해야 하는 제한적인 상황에서는 아래
+옵션을 사용할 수 있습니다. `package-lock.json`이 바뀐 경우에는 사용하지 마세요.
+
+```powershell
+.\scripts\prepare-cafe24.ps1 -SkipRuntimeDependencies
+```
+
+기본적으로 커밋되지 않은 소스는 배포할 수 없습니다. 임시 확인용으로만
+`-AllowDirtySource`를 사용할 수 있으며, 이 경우 `SOURCE_COMMIT` 뒤에 `-dirty`가 붙습니다.
+
+스크립트는 테스트, Git commit, push, Cafe24 앱 재시작을 실행하지 않습니다.
+
+### 변경사항 확인 및 배포
+
+스크립트 완료 후 배포 저장소의 변경사항을 검토합니다.
+
+```powershell
+git -C C:\WORK\bis2203_obgc status --short
+git -C C:\WORK\bis2203_obgc diff --check
+git -C C:\WORK\bis2203_obgc diff
+```
+
+문제가 없으면 `SOURCE_COMMIT`에 기록된 짧은 커밋 해시를 메시지에 넣어 배포 커밋을
+생성하고 Cafe24의 `master` 브랜치로 push합니다.
+
+```powershell
+git -C C:\WORK\bis2203_obgc add -A
+git -C C:\WORK\bis2203_obgc commit -m "deploy: <source-commit>"
+git -C C:\WORK\bis2203_obgc push origin master
+```
+
+push 후 Cafe24 나의서비스관리의 **앱 생성/관리**에서 앱을 **중지 → 실행**해야 변경사항이
+반영됩니다. 앱 재시작 시 진행 중인 Colyseus 방과 게임이 종료되므로 이용자가 없을 때
+배포하세요.
+
+### 권장 확인 명령
+
+프로젝트 정책상 배포 스크립트는 테스트를 자동 실행하지 않습니다. 배포 준비 전에 필요한
+검증을 직접 실행하세요.
+
+```powershell
+cd C:\WORK\OBGC\server
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+npm run build
+
+cd C:\WORK\OBGC\client
+npm run build
+```
+
+## 7) 새 보드게임 추가(확장) 가이드
 아래 순서대로 구현하면 기존 구조와 가장 자연스럽게 연결됩니다.
 
 ### Step 1. 서버 게임 룸 클래스 추가
@@ -148,7 +237,7 @@ const games = {
 - 불법 액션 차단 테스트(내 턴 아님, 잘못된 카드/말 선택 등)
 - 게임 종료 후 리턴 룸 이동 메시지 테스트
 
-## 7) 구현 시 체크리스트
+## 8) 구현 시 체크리스트
 - [ ] 서버 룸 키(`define`)와 클라이언트 선택 값(`option value`) 일치
 - [ ] 게임방 입장 후 `onStateChange`가 정상적으로 화면 갱신
 - [ ] 게임 종료 시 `move_room` 이벤트로 테이블 복귀 가능
