@@ -1,18 +1,27 @@
 // server\src\rooms\MapleOneCardRoom.ts
 import { Room, Client, matchMaker } from 'colyseus';
 import { Schema, MapSchema, ArraySchema, type } from '@colyseus/schema';
+import { createDeck as createOneCardDeck, shuffle } from './maple-onecard/deck';
+import {
+  canDefendAttack,
+  getAttackValue,
+  isAttackCard,
+} from './maple-onecard/rules';
+import type { Card, CardColor, CardType } from './maple-onecard/types';
 
 // --- 스키마 정의 ---
 export class OneCardCard extends Schema {
   @type('string') id: string = '';
-  @type('string') color: string = ''; // red, yellow, green, blue, purple
-  @type('string') type: string = ''; // number, jump, reverse, plus1, wild, attack2, attack3, oz, mihile, hawkeye, irina, ikart
+  @type('string') color: CardColor = 'red';
+  @type('string') type: CardType = 'number';
   @type('number') number: number = 0; // 숫자카드가 아니면 0
 }
 
 export class OneCardPlayer extends Schema {
   @type('string') sessionId: string = '';
+  @type('string') playerId: string = '';
   @type('string') nickname: string = '';
+  @type('boolean') isHost: boolean = false;
   @type([OneCardCard]) hand = new ArraySchema<OneCardCard>();
 
   @type('boolean') alive: boolean = true;
@@ -26,6 +35,7 @@ export class OneCardPlayer extends Schema {
 
 export class MapleOneCardState extends Schema {
   @type({ map: OneCardPlayer }) players = new MapSchema<OneCardPlayer>();
+  @type('string') hostPlayerId: string = '';
 
   @type([OneCardCard]) deck = new ArraySchema<OneCardCard>();
   @type([OneCardCard]) discardPile = new ArraySchema<OneCardCard>();
@@ -44,72 +54,17 @@ export class MapleOneCardState extends Schema {
   @type('number') turnCount: number = 0;
 }
 
-// --- 덱 생성 ---
-let seq = 0;
-function nextCardId() {
-  seq += 1;
-  return `oc_${seq}`;
-}
-
-function makeCard(color: string, type: string, number = 0): OneCardCard {
+function toSchemaCard(source: Card): OneCardCard {
   const card = new OneCardCard();
-  card.id = nextCardId();
-  card.color = color;
-  card.type = type;
-  card.number = number;
+  card.id = source.id;
+  card.color = source.color;
+  card.type = source.type;
+  card.number = source.number ?? 0;
   return card;
 }
 
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function createDeck(): OneCardCard[] {
-  const deck: OneCardCard[] = [];
-  const colors = ['red', 'yellow', 'green', 'blue'];
-
-  for (const color of colors) {
-    for (let n = 1; n <= 6; n++) {
-      deck.push(makeCard(color, 'number', n));
-    }
-
-    deck.push(makeCard(color, 'jump'));
-    deck.push(makeCard(color, 'reverse'));
-    deck.push(makeCard(color, 'plus1'));
-    deck.push(makeCard(color, 'wild'));
-
-    deck.push(makeCard(color, 'attack2'));
-    deck.push(makeCard(color, 'attack3'));
-  }
-
-  deck.push(makeCard('red', 'oz'));
-  deck.push(makeCard('yellow', 'mihile'));
-  deck.push(makeCard('blue', 'hawkeye'));
-  deck.push(makeCard('green', 'irina'));
-  deck.push(makeCard('purple', 'ikart'));
-
-  return shuffle(deck);
-}
-
-// --- 룰 유틸 ---
-function isAttackCard(card: OneCardCard | undefined | null) {
-  if (!card) return false;
-  return (
-    card.type === 'attack2' || card.type === 'attack3' || card.type === 'oz'
-  );
-}
-
-function getAttackValue(card: OneCardCard | undefined | null) {
-  if (!card) return 0;
-  if (card.type === 'attack2') return 2;
-  if (card.type === 'attack3') return 3;
-  if (card.type === 'oz') return 5;
-  return 0;
+function createSchemaDeck(): OneCardCard[] {
+  return createOneCardDeck().map(toSchemaCard);
 }
 
 function getTopCard(state: MapleOneCardState): OneCardCard | null {
@@ -120,22 +75,32 @@ function getTopCard(state: MapleOneCardState): OneCardCard | null {
 export class MapleOneCardRoom extends Room<MapleOneCardState> {
   private isReturning = false;
 
-  onCreate() {
+  onCreate(options: any) {
     this.setState(new MapleOneCardState());
     this.maxClients = 4;
+    this.state.hostPlayerId = this.readIdentity(options?.hostPlayerId, '');
 
     this.onMessage('chat', (client, message) => {
+      const player = this.state.players.get(client.sessionId);
       this.broadcast('chat', {
-        clientId: client.sessionId,
+        clientId: player?.nickname ?? client.sessionId,
         message: `[메이플원카드] ${message}`,
       });
     });
 
     this.onMessage('start_game', (client) => {
       if (this.state.gamePhase !== 'waiting') return;
-      if (this.state.players.size < 2) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isHost) return;
+      if (this.state.players.size < 2) {
+        client.send('chat', {
+          clientId: 'System',
+          message: '원카드는 2명 이상 모여야 시작할 수 있습니다.',
+        });
+        return;
+      }
 
-      this.startGame();
+      this.startGame(client.sessionId);
       this.broadcast('chat', {
         clientId: 'System',
         message: `🃏 메이플 원카드 게임이 시작되었습니다!`,
@@ -242,13 +207,27 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
     const player = new OneCardPlayer();
     player.sessionId = client.sessionId;
-    player.nickname = options?.nickname || client.sessionId;
+    player.playerId = this.readIdentity(options?.playerId, client.sessionId);
+    player.nickname = this.readIdentity(
+      options?.nickname,
+      `플레이어 ${player.playerId.slice(0, 4)}`,
+    );
+
+    const isFirstPlayer = this.state.players.size === 0;
+    const isDesignatedHost =
+      this.state.hostPlayerId !== '' &&
+      player.playerId === this.state.hostPlayerId;
+    player.isHost =
+      isDesignatedHost || (isFirstPlayer && this.state.hostPlayerId === '');
+
+    if (isDesignatedHost) {
+      this.state.players.forEach(
+        (existingPlayer) => (existingPlayer.isHost = false),
+      );
+    }
+    if (player.isHost) this.state.hostPlayerId = player.playerId;
 
     this.state.players.set(client.sessionId, player);
-
-    if (this.state.players.size === 1) {
-      this.state.currentTurnId = client.sessionId;
-    }
 
     this.broadcast('chat', {
       clientId: 'System',
@@ -262,12 +241,9 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
     // waiting 상태에서는 그냥 제거
     if (this.state.gamePhase === 'waiting') {
+      const wasHost = player.isHost;
       this.state.players.delete(client.sessionId);
-
-      if (this.state.currentTurnId === client.sessionId) {
-        const ids = Array.from(this.state.players.keys());
-        this.state.currentTurnId = ids[0] || '';
-      }
+      if (wasHost) this.transferHost();
       return;
     }
 
@@ -291,7 +267,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
   }
 
   // --- 게임 시작 ---
-  private startGame() {
+  private startGame(hostSessionId: string) {
     this.state.deck.clear();
     this.state.discardPile.clear();
     this.state.rankings.clear();
@@ -302,7 +278,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     this.state.lastAction = '게임 시작';
     this.state.gamePhase = 'playing';
 
-    const rawDeck = createDeck();
+    const rawDeck = createSchemaDeck();
 
     this.state.players.forEach((player) => {
       player.hand.clear();
@@ -338,7 +314,9 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     rawDeck.forEach((card) => this.state.deck.push(card));
 
     const ids = Array.from(this.state.players.keys());
-    this.state.currentTurnId = ids[0] || '';
+    this.state.currentTurnId = ids.includes(hostSessionId)
+      ? hostSessionId
+      : ids[0] || '';
 
     const top = getTopCard(this.state);
     if (top && isAttackCard(top)) {
@@ -360,16 +338,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     // 공격 진행 중이면 공격 대응 규칙 우선
     if (this.state.pendingAttack > 0) {
       if (!top) return false;
-
-      if (top.type === 'oz') {
-        return card.type === 'mihile' || card.type === 'ikart';
-      }
-
-      if (card.type === 'mihile' || card.type === 'ikart') return true;
-
-      if (!isAttackCard(card)) return false;
-
-      return getAttackValue(card) >= getAttackValue(top);
+      return canDefendAttack(top, card);
     }
 
     // 이카르트는 언제든 가능
@@ -798,5 +767,26 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     if (!card) return '없음';
     if (card.type === 'number') return `${card.color} ${card.number}`;
     return `${card.color} ${card.type}`;
+  }
+
+  private transferHost() {
+    this.state.players.forEach((player) => (player.isHost = false));
+    const nextHost = Array.from(this.state.players.values())[0];
+
+    if (!nextHost) {
+      this.state.hostPlayerId = '';
+      return;
+    }
+
+    nextHost.isHost = true;
+    this.state.hostPlayerId = nextHost.playerId;
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `${nextHost.nickname} 님이 새 방장이 되었습니다.`,
+    });
+  }
+
+  private readIdentity(value: unknown, fallback: string) {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   }
 }

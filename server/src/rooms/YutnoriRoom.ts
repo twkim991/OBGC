@@ -9,6 +9,9 @@ export class YutPiece extends Schema {
 }
 export class YutPlayer extends Schema {
   @type('string') sessionId: string;
+  @type('string') playerId: string;
+  @type('string') nickname: string;
+  @type('boolean') isHost: boolean = false;
   @type('string') teamColor: string;
   @type([YutPiece]) pieces = new ArraySchema<YutPiece>();
 
@@ -18,9 +21,10 @@ export class YutPlayer extends Schema {
 }
 export class YutnoriState extends Schema {
   @type({ map: YutPlayer }) players = new MapSchema<YutPlayer>();
+  @type('string') hostPlayerId: string = '';
   @type('string') currentTurnId: string = '';
   @type(['number']) remainingThrows = new ArraySchema<number>();
-  @type('string') gamePhase: string = 'throwing'; // throwing, moving, finished
+  @type('string') gamePhase: string = 'waiting'; // waiting, throwing, moving, finished
   @type('string') winnerSessionId: string = ''; // 승리자 ID 저장용 변수
   @type(['number']) titans = new ArraySchema<number>(); // 🔥 거인 위치 배열
 }
@@ -95,13 +99,37 @@ const PREV_MAP: Record<number, number> = {
 export class YutnoriRoom extends Room<YutnoriState> {
   private isReturning = false;
 
-  onCreate() {
+  onCreate(options: any) {
     this.setState(new YutnoriState());
     this.maxClients = 4;
+    this.state.hostPlayerId = this.readIdentity(options?.hostPlayerId, '');
+
+    this.onMessage('start_game', (client) => {
+      if (this.state.gamePhase !== 'waiting') return;
+
+      const player = this.state.players.get(client.sessionId);
+      if (!player?.isHost) return;
+
+      if (this.state.players.size < 2) {
+        client.send('chat', {
+          clientId: 'System',
+          message: '윷놀이는 2명 이상 모여야 시작할 수 있습니다.',
+        });
+        return;
+      }
+
+      this.state.currentTurnId = client.sessionId;
+      this.state.gamePhase = 'throwing';
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `${player.nickname} 방장이 윷놀이를 시작했습니다.`,
+      });
+    });
 
     this.onMessage('chat', (client, message) => {
+      const player = this.state.players.get(client.sessionId);
       this.broadcast('chat', {
-        clientId: client.sessionId,
+        clientId: player?.nickname ?? client.sessionId,
         message: `[윷놀이] ${message}`,
       });
     });
@@ -178,7 +206,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
         this.state.remainingThrows.push(result.steps);
       }
 
-      let message = `🎲 ${client.sessionId}님이 [${result.name}]를 던졌습니다!`;
+      let message = `🎲 ${player.nickname}님이 [${result.name}]를 던졌습니다!`;
 
       if (result.steps === 4 || result.steps === 5) {
         message += ' 한 번 더 던지세요!! 🔥';
@@ -225,7 +253,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
         player.usedSkillThisTurn = true;
         this.broadcast('chat', {
           clientId: 'System',
-          message: `👻 [스텔스 모드] 가동! ${client.sessionId}의 말이 투명해졌습니다!`,
+          message: `👻 [스텔스 모드] 가동! ${player.nickname}의 말이 투명해졌습니다!`,
         });
       }
 
@@ -248,7 +276,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
               this.state.titans.splice(titanIndex, 1); // 밥 먹은 거인은 퇴근
               this.broadcast('chat', {
                 clientId: 'System',
-                message: `🩸 콰직!! 무지성거인이 ${client.sessionId}의 말을 잡아먹고 사라졌습니다!`,
+                message: `🩸 콰직!! 무지성거인이 ${player.nickname}의 말을 잡아먹고 사라졌습니다!`,
               });
               break; // 강제 종료
             }
@@ -282,7 +310,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
               this.state.titans.splice(titanIndex, 1);
               this.broadcast('chat', {
                 clientId: 'System',
-                message: `🩸 콰직!! 무지성거인이 ${client.sessionId}의 말을 잡아먹고 사라졌습니다!`,
+                message: `🩸 콰직!! 무지성거인이 ${player.nickname}의 말을 잡아먹고 사라졌습니다!`,
               });
               break;
             }
@@ -329,7 +357,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
         this.state.gamePhase = 'finished';
         this.broadcast('chat', {
           clientId: 'System',
-          message: `🎉 게임 종료! ${client.sessionId}님이 윷놀이를 제패했습니다!`,
+          message: `🎉 게임 종료! ${player.nickname}님이 윷놀이를 제패했습니다!`,
         });
         return;
       }
@@ -337,7 +365,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
       if (caughtOpponent) {
         this.broadcast('chat', {
           clientId: 'System',
-          message: `⚔️ 피의 숙청! ${client.sessionId}님이 상대방 말을 짓밟았습니다! 보너스 턴 획득!`,
+          message: `⚔️ 피의 숙청! ${player.nickname}님이 상대방 말을 짓밟았습니다! 보너스 턴 획득!`,
         });
         this.state.gamePhase = 'throwing';
       } else if (this.state.remainingThrows.length === 0) {
@@ -387,7 +415,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
         player.activeSkill = '';
         return this.broadcast('chat', {
           clientId: 'System',
-          message: `🛡️ ${client.sessionId}님이 스킬 장전을 취소했습니다.`,
+          message: `🛡️ ${player.nickname}님이 스킬 장전을 취소했습니다.`,
         });
       }
 
@@ -447,9 +475,9 @@ export class YutnoriRoom extends Room<YutnoriState> {
         }
         // 👻 [스텔스] & 일반 장전형
         else {
-          let msg = `⚡ ${client.sessionId}님이 [${skillId}] 스킬을 장전했습니다! (다시 누르면 취소)`;
+          let msg = `⚡ ${player.nickname}님이 [${skillId}] 스킬을 장전했습니다! (다시 누르면 취소)`;
           if (skillId === 'STEALTH_MODE') {
-            msg = `👻 ${client.sessionId}님이 [스텔스 모드]를 장전했습니다! 이번 턴에 움직이는 말은 투명해집니다.`;
+            msg = `👻 ${player.nickname}님이 [스텔스 모드]를 장전했습니다! 이번 턴에 움직이는 말은 투명해집니다.`;
           }
           this.broadcast('chat', { clientId: 'System', message: msg });
         }
@@ -457,14 +485,33 @@ export class YutnoriRoom extends Room<YutnoriState> {
     });
   }
 
-  onJoin(client: Client) {
+  onJoin(client: Client, options: any) {
+    if (this.state.gamePhase !== 'waiting') {
+      client.leave();
+      return;
+    }
+
     const player = new YutPlayer();
     player.sessionId = client.sessionId;
+    player.playerId = this.readIdentity(options?.playerId, client.sessionId);
+    player.nickname = this.readIdentity(options?.nickname, `플레이어 ${player.playerId.slice(0, 4)}`);
+
+    const isFirstPlayer = this.state.players.size === 0;
+    const isDesignatedHost =
+      this.state.hostPlayerId !== '' && player.playerId === this.state.hostPlayerId;
+    player.isHost =
+      isDesignatedHost || (isFirstPlayer && this.state.hostPlayerId === '');
+
+    if (isDesignatedHost) {
+      this.state.players.forEach((existingPlayer) => (existingPlayer.isHost = false));
+    }
+    if (player.isHost) this.state.hostPlayerId = player.playerId;
+
     player.teamColor = this.state.players.size % 2 === 0 ? 'red' : 'blue';
 
     for (let i = 0; i < 4; i++) {
       const piece = new YutPiece();
-      piece.id = `${client.sessionId}-p${i}`;
+      piece.id = `${player.playerId}-p${i}`;
       piece.position = 0;
       player.pieces.push(piece);
     }
@@ -482,28 +529,63 @@ export class YutnoriRoom extends Room<YutnoriState> {
 
     this.state.players.set(client.sessionId, player);
 
-    if (this.state.players.size === 1) {
-      this.state.currentTurnId = client.sessionId;
-    }
-
     this.broadcast('chat', {
       clientId: 'System',
-      message: `${client.sessionId} 님이 입장했습니다.`,
+      message: `${player.nickname} 님이 입장했습니다.`,
     });
   }
 
   onLeave(client: Client) {
+    const leavingPlayer = this.state.players.get(client.sessionId);
+    const wasHost = leavingPlayer?.isHost ?? false;
     this.state.players.delete(client.sessionId);
+
+    if (wasHost) this.transferHost();
+
+    if (
+      this.state.gamePhase !== 'waiting' &&
+      this.state.gamePhase !== 'finished' &&
+      client.sessionId === this.state.currentTurnId
+    ) {
+      this.passTurn();
+    }
   }
 
   passTurn() {
     const playerIds = Array.from(this.state.players.keys());
+    if (playerIds.length === 0) {
+      this.state.currentTurnId = '';
+      return;
+    }
+
     const currentIndex = playerIds.indexOf(this.state.currentTurnId);
-    this.state.currentTurnId = playerIds[(currentIndex + 1) % playerIds.length];
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % playerIds.length;
+    this.state.currentTurnId = playerIds[nextIndex];
 
     this.state.players.forEach((p) => {
       p.usedSkillThisTurn = false;
       p.activeSkill = '';
     });
+  }
+
+  private transferHost() {
+    this.state.players.forEach((player) => (player.isHost = false));
+    const nextHost = Array.from(this.state.players.values())[0];
+
+    if (!nextHost) {
+      this.state.hostPlayerId = '';
+      return;
+    }
+
+    nextHost.isHost = true;
+    this.state.hostPlayerId = nextHost.playerId;
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `${nextHost.nickname} 님이 새 방장이 되었습니다.`,
+    });
+  }
+
+  private readIdentity(value: unknown, fallback: string) {
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   }
 }

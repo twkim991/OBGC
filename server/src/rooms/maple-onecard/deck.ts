@@ -1,5 +1,5 @@
 // server/src/rooms/maple-onecard/deck.ts
-import { Card } from './types';
+import type { Card } from './types';
 
 let seq = 0;
 const makeId = () => `c_${seq++}`;
