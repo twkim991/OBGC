@@ -1,201 +1,240 @@
 <template>
-  <div class="game-screen yutnori">
-    <div v-if="gamePhase === 'finished'" class="game-over-overlay">
-      <div class="game-over-modal">
-        <template v-if="winnerSessionId === mySessionId">
-          <h1 class="win-title">🎉 완벽한 압승! 🎉</h1>
-          <p class="sub-text">상대방을 무참히 짓밟고 윷놀이를 제패하셨습니다.</p>
-        </template>
-
-        <template v-else>
-          <h1 class="lose-title">💀 처참한 패배... 💀</h1>
-          <p class="sub-text">
-            승리자: <strong>{{ winnerName }}</strong>
-          </p>
-          <p class="sub-text">다음엔 꼭 복수하세요.</p>
-        </template>
-
-        <div class="action-buttons">
-          <button @click="returnToTable" class="return-btn">🔥 멤버 그대로 대기실 복귀</button>
-          <button @click="leave" class="leave-btn-small">파티 탈퇴 (로비로)</button>
-        </div>
+  <div class="yut-game">
+    <header class="game-topbar">
+      <div>
+        <p class="eyebrow">플레이 화면</p>
+        <h1>초능력 윷놀이</h1>
       </div>
-    </div>
-    <div class="header">
-      <h1>🎲 윷놀이 한 판!</h1>
-      <button @click="leave" class="leave-btn">게임 포기</button>
-    </div>
+      <div class="topbar-actions">
+        <div class="turn-status" role="status">
+          <span>현재 턴</span>
+          <strong>{{ currentTurnName }} · {{ phaseLabel }}</strong>
+        </div>
+        <button class="leave-button" type="button" @click="leave">게임 나가기</button>
+      </div>
+    </header>
 
-    <div class="game-area">
-      <div class="board">
-        <svg viewBox="0 0 100 100" class="yut-board-svg">
-          <rect x="10" y="10" width="80" height="80" class="board-line" />
-          <line x1="10" y1="10" x2="90" y2="90" class="board-line" />
-          <line x1="90" y1="10" x2="10" y2="90" class="board-line" />
+    <section class="play-grid">
+      <article class="board-panel" aria-labelledby="board-heading">
+        <div class="panel-heading board-heading">
+          <div>
+            <p class="panel-caption">게임 보드</p>
+            <h2 id="board-heading">말의 위치</h2>
+          </div>
+          <div class="board-legend" aria-label="말 색상 안내">
+            <span><i class="legend-dot" :class="myTeamColor"></i>내 말</span>
+            <span><i class="legend-dot" :class="rivalTeamColor"></i>상대 말</span>
+          </div>
+        </div>
 
-          <g v-for="(node, index) in boardNodes" :key="'node-' + index" class="node-group">
-            <circle
-              :cx="node.x"
-              :cy="node.y"
-              :r="index === 0 ? 5 : 3"
-              :class="[
-                'node-circle',
-                { 'start-node': index === 0, 'corner-node': isCorner(index) },
-              ]"
-            />
-            <text :x="node.x" :y="node.y + 1" class="node-text">{{ index }}</text>
-          </g>
+        <div class="board-frame">
+          <svg viewBox="0 0 100 100" class="yut-board-svg" role="img" aria-labelledby="board-title board-desc">
+            <title id="board-title">초능력 윷놀이 진행 판</title>
+            <desc id="board-desc">각 플레이어의 말과 거인 장애물 위치를 보여줍니다.</desc>
+            <rect x="10" y="10" width="80" height="80" class="board-line" />
+            <line x1="10" y1="10" x2="90" y2="90" class="board-line" />
+            <line x1="90" y1="10" x2="10" y2="90" class="board-line" />
 
-          <g v-if="gameState && gameState.titans" class="titans-layer">
-            <text
-              v-for="(titanPos, idx) in gameState.titans"
-              :key="'titan-' + idx"
-              :x="boardNodes[titanPos].x"
-              :y="boardNodes[titanPos].y"
-              class="titan-icon blink"
-            >
-              👹
-            </text>
-          </g>
+            <g v-for="(node, index) in boardNodes" :key="`node-${index}`" class="node-group">
+              <circle
+                :cx="node.x"
+                :cy="node.y"
+                :r="index === 0 ? 5 : isCorner(index) ? 3.2 : 2.3"
+                :class="['node-circle', { 'start-node': index === 0, 'corner-node': isCorner(index) }]"
+              />
+              <text :x="node.x" :y="node.y + 1" class="node-text">{{ index }}</text>
+            </g>
 
-          <g v-if="gameState" class="pieces-layer">
-            <g
-              v-for="(player, sessionId) in gameState.players"
-              :key="sessionId"
-              class="player-group"
-            >
-              <g v-for="(piece, pieceIdx) in player.pieces" :key="piece.id" class="piece-group">
-                <circle
-                  v-if="piece.position !== 99"
-                  :cx="getPieceX(piece.position, pieceIdx)"
-                  :cy="getPieceY(piece.position, pieceIdx)"
-                  :r="4"
-                  :class="[
-                    'player-piece',
-                    player.teamColor,
-                    {
-                      highlighted:
-                        isMyTurn && sessionId === mySessionId && pieceIdx === selectedPieceIndex,
-                      'stealth-active': piece.isStealth, // 🔥 2. 스텔스 클래스 동적 부여
-                    },
-                  ]"
-                />
+            <g v-if="gameState?.titans" class="titans-layer">
+              <text
+                v-for="(titanPos, index) in gameState.titans"
+                :key="`titan-${index}`"
+                :x="boardNodes[titanPos].x"
+                :y="boardNodes[titanPos].y"
+                class="titan-icon"
+              >
+                👹
+              </text>
+            </g>
+
+            <g v-if="gameState" class="pieces-layer">
+              <g v-for="(player, sessionId) in gameState.players" :key="sessionId" class="player-group">
+                <g v-for="(piece, pieceIndex) in player.pieces" :key="piece.id" class="piece-group">
+                  <circle
+                    v-if="piece.position !== 99"
+                    :cx="getPieceX(piece.position, pieceIndex)"
+                    :cy="getPieceY(piece.position, pieceIndex)"
+                    :r="4"
+                    :class="[
+                      'player-piece',
+                      player.teamColor,
+                      {
+                        highlighted:
+                          isMyTurn && sessionId === mySessionId && pieceIndex === selectedPieceIndex,
+                        'stealth-active': piece.isStealth,
+                      },
+                    ]"
+                  />
+                </g>
               </g>
             </g>
-          </g>
-        </svg>
-      </div>
+          </svg>
+        </div>
+      </article>
 
-      <div class="controls">
-        <div class="status-panel">
-          <template v-if="gamePhase === 'waiting'">
-            <h2>함께할 플레이어를 기다리는 중</h2>
-            <p class="waiting-copy">현재 {{ playerCount }}명 · 2명 이상이면 시작할 수 있습니다.</p>
+      <div class="controls-stack">
+        <article class="control-panel">
+          <div class="panel-heading">
+            <h2>이번 턴</h2>
+            <span>{{ phaseLabel }}</span>
+          </div>
+
+          <div class="phase-copy" role="status" aria-live="polite">
+            <strong>{{ phaseTitle }}</strong>
+            <span>{{ phaseDescription }}</span>
+          </div>
+
+          <div v-if="gamePhase === 'waiting'" class="waiting-actions">
+            <p>현재 {{ playerCount }}명 · 2명 이상이면 시작할 수 있습니다.</p>
             <button
               v-if="isHost"
-              class="start-btn"
+              class="button button-primary"
               :disabled="playerCount < 2"
+              type="button"
               @click="startGame"
             >
               윷놀이 시작
             </button>
-            <p v-else class="waiting-notice">방장이 게임을 시작할 때까지 잠시 기다려 주세요.</p>
-          </template>
-          <h2 v-else-if="isMyTurn && gamePhase === 'throwing'" class="my-turn blink">
-            🔥 윷을 던지세요!
-          </h2>
-          <h2 v-else-if="isMyTurn && gamePhase === 'moving'" class="my-turn blink">
-            👇 말과 사용할 윷을 선택하세요!
-          </h2>
-          <h2 v-else>상대방 턴 대기 중...</h2>
+            <p v-else>방장이 게임을 시작할 때까지 잠시 기다려 주세요.</p>
+          </div>
 
-          <div v-if="mySkills.length > 0" class="skills-section">
-            <h4>✨ 내 보유 초능력 (1회용)</h4>
-            <div class="skills-row">
-              <div
+          <section v-if="mySkills.length" class="control-section" aria-labelledby="skills-title">
+            <h3 id="skills-title">보유 초능력 · 1회용</h3>
+            <div class="skill-list">
+              <button
                 v-for="skill in mySkills"
                 :key="skill"
-                class="skill-card"
-                :class="{
-                  disabled: !isMyTurn || gamePhase !== 'throwing',
-                  active: myActiveSkill === skill,
-                }"
+                class="skill-button"
+                :class="{ active: myActiveSkill === skill }"
+                :disabled="!isMyTurn || gamePhase !== 'throwing'"
+                :aria-pressed="myActiveSkill === skill"
+                type="button"
                 @click="activateSkill(skill)"
               >
-                <div class="skill-name">{{ skillInfo[skill].name }}</div>
-                <div class="skill-desc">{{ skillInfo[skill].desc }}</div>
-              </div>
+                <span>
+                  <strong>{{ skillInfo[skill]?.name || skill }}</strong>
+                  <small>{{ skillInfo[skill]?.desc || '이번 턴에 사용할 초능력입니다.' }}</small>
+                </span>
+                <code>{{ myActiveSkill === skill ? 'ACTIVE' : 'READY' }}</code>
+              </button>
             </div>
-            <div v-if="myActiveSkill" class="active-skill-notice blink">
-              ⚡ [{{ skillInfo[myActiveSkill].name }}] 장전 완료! 어서 윷을 던지세요!
-            </div>
-          </div>
+            <p v-if="myActiveSkill" class="active-skill-notice">
+              {{ skillInfo[myActiveSkill]?.name || myActiveSkill }}이 준비됐습니다. 윷을 던지세요.
+            </p>
+          </section>
 
-          <div v-if="remainingThrows.length > 0" class="throw-stack">
-            <h4>보유한 윷 (클릭해서 선택)</h4>
-            <div class="stack-row">
-              <div
-                v-for="(steps, idx) in remainingThrows"
-                :key="idx"
-                class="stack-item"
-                :class="{ selected: selectedThrowIndex === idx && gamePhase === 'moving' }"
-                @click="gamePhase === 'moving' ? (selectedThrowIndex = idx) : null"
+          <section v-if="remainingThrows.length" class="control-section" aria-labelledby="throws-title">
+            <h3 id="throws-title">보유한 윷 · 이동 결과 선택</h3>
+            <div class="throw-row">
+              <button
+                v-for="(steps, index) in remainingThrows"
+                :key="`${steps}-${index}`"
+                class="throw-choice"
+                :class="{ selected: selectedThrowIndex === index && gamePhase === 'moving' }"
+                :disabled="gamePhase !== 'moving'"
+                :aria-pressed="selectedThrowIndex === index && gamePhase === 'moving'"
+                type="button"
+                @click="selectedThrowIndex = index"
               >
                 {{ getThrowName(steps) }}
-              </div>
+              </button>
             </div>
-          </div>
+          </section>
 
-          <div v-if="isMyTurn" class="piece-selection">
-            <h4>내 말 선택</h4>
-            <div class="pieces-row">
-              <div
-                v-for="(piece, idx) in myPieces"
+          <section v-if="isMyTurn && myPieces.length" class="control-section" aria-labelledby="pieces-title">
+            <h3 id="pieces-title">움직일 내 말</h3>
+            <div class="piece-row">
+              <button
+                v-for="(piece, index) in myPieces"
                 :key="piece.id"
-                class="piece-selector"
+                class="piece-choice"
                 :class="{
-                  selected: selectedPieceIndex === idx,
+                  selected: selectedPieceIndex === index,
                   finished: piece.position === 99,
-                  'stealth-ui': piece.isStealth,
+                  stealth: piece.isStealth,
                 }"
-                @click="piece.position !== 99 ? (selectedPieceIndex = idx) : null"
+                :disabled="piece.position === 99"
+                :aria-pressed="selectedPieceIndex === index"
+                type="button"
+                @click="selectedPieceIndex = index"
               >
-                말 {{ idx + 1 }}
-                <div class="pos-text">
-                  {{
-                    piece.position === 99
-                      ? '완주'
-                      : piece.position === 0
-                        ? '대기'
-                        : `${piece.position}번칸`
-                  }}
-                </div>
-                <div v-if="piece.isStealth" class="stealth-badge">👻 투명화</div>
-              </div>
+                <strong>말 {{ index + 1 }}</strong>
+                <span>
+                  {{ piece.position === 99 ? '완주' : piece.position === 0 ? '대기' : `${piece.position}번 칸` }}
+                </span>
+                <small v-if="piece.isStealth">투명화</small>
+              </button>
             </div>
+          </section>
+
+          <div class="primary-actions">
+            <button
+              v-if="isMyTurn && gamePhase === 'throwing'"
+              class="button button-primary"
+              type="button"
+              @click="throwYut"
+            >
+              윷 던지기
+            </button>
+            <button
+              v-if="isMyTurn && gamePhase === 'moving'"
+              class="button button-primary"
+              type="button"
+              @click="movePiece"
+            >
+              선택한 말 이동
+            </button>
           </div>
-        </div>
+        </article>
 
-        <button v-if="isMyTurn && gamePhase === 'throwing'" @click="throwYut" class="throw-btn">
-          🎲 윷 던지기!
-        </button>
-        <button v-if="isMyTurn && gamePhase === 'moving'" @click="movePiece" class="move-btn">
-          📍 선택한 말 이동하기!
-        </button>
+        <aside class="chat-panel" aria-labelledby="chat-title">
+          <div class="panel-heading">
+            <h2 id="chat-title">테이블 채팅</h2>
+            <span>{{ messages.length }}개</span>
+          </div>
+          <div ref="chatBox" class="chat-log" role="log" aria-live="polite">
+            <p v-if="!messages.length" class="chat-empty">첫 메시지를 보내 대화를 시작해보세요.</p>
+            <p v-for="(msg, index) in messages" :key="index" class="message-row">
+              <strong :class="{ system: msg.clientId === 'System' }">{{ msg.clientId }}</strong>
+              <span>{{ msg.message }}</span>
+            </p>
+          </div>
+          <form class="chat-form" @submit.prevent="sendMessage">
+            <input v-model="inputMessage" aria-label="채팅 메시지" placeholder="메시지를 입력하세요" />
+            <button type="submit">전송</button>
+          </form>
+        </aside>
       </div>
-    </div>
+    </section>
 
-    <div class="mini-chat">
-      <div class="chat-box" ref="chatBox">
-        <div v-for="(msg, index) in messages" :key="index" class="message">
-          <strong :class="{ system: msg.clientId === 'System' }">{{ msg.clientId }}:</strong>
-          {{ msg.message }}
+    <div v-if="gamePhase === 'finished'" class="modal-backdrop">
+      <section class="result-modal" role="dialog" aria-modal="true" aria-labelledby="game-result-title">
+        <p class="eyebrow">게임 종료</p>
+        <template v-if="winnerSessionId === mySessionId">
+          <h2 id="game-result-title">승리했습니다.</h2>
+          <p>모든 말을 먼저 완주했습니다.</p>
+        </template>
+        <template v-else>
+          <h2 id="game-result-title">게임이 끝났습니다.</h2>
+          <p>승리자: <strong>{{ winnerName }}</strong></p>
+        </template>
+        <div class="result-actions">
+          <button class="button button-primary" type="button" @click="returnToTable">
+            멤버 그대로 테이블로 복귀
+          </button>
+          <button class="button button-secondary" type="button" @click="leave">로비로 나가기</button>
         </div>
-      </div>
-      <form @submit.prevent="sendMessage">
-        <input v-model="inputMessage" placeholder="메시지..." />
-        <button type="submit">전송</button>
-      </form>
+      </section>
     </div>
   </div>
 </template>
@@ -208,16 +247,13 @@ const emit = defineEmits(['leave-game', 'move-to-game']);
 
 const gameState = ref(null);
 const currentTurnId = ref('');
-const lastThrowResult = ref('');
 const messages = ref([]);
 const inputMessage = ref('');
 const chatBox = ref(null);
-
 const gamePhase = ref('waiting');
 const winnerSessionId = ref('');
 const selectedPieceIndex = ref(0);
 const mySessionId = ref('');
-
 const remainingThrows = ref([]);
 const selectedThrowIndex = ref(0);
 
@@ -228,48 +264,76 @@ const myPlayer = computed(() => {
 
 const playerCount = computed(() => Object.keys(gameState.value?.players ?? {}).length);
 const isHost = computed(() => Boolean(myPlayer.value?.isHost));
+const myTeamColor = computed(() => myPlayer.value?.teamColor || 'blue');
+const rivalTeamColor = computed(() => {
+  const rival = Object.values(gameState.value?.players ?? {}).find(
+    (player) => player.teamColor !== myTeamColor.value
+  );
+  return rival?.teamColor || (myTeamColor.value === 'red' ? 'blue' : 'red');
+});
 const winnerName = computed(() => {
   const winner = gameState.value?.players?.[winnerSessionId.value];
   return winner?.nickname || winnerSessionId.value;
 });
 
+const currentTurnName = computed(() => {
+  if (gamePhase.value === 'waiting') return '대기 중';
+  const player = gameState.value?.players?.[currentTurnId.value];
+  return player?.nickname || currentTurnId.value || '-';
+});
+
+const phaseLabel = computed(() => {
+  const labels = { waiting: '대기', throwing: '던지기', moving: '이동', finished: '종료' };
+  return labels[gamePhase.value] || gamePhase.value;
+});
+
+const isMyTurn = computed(() => currentTurnId.value === props.gameConnection?.sessionId);
+
+const phaseTitle = computed(() => {
+  if (gamePhase.value === 'waiting') return '함께할 플레이어를 기다리고 있습니다.';
+  if (gamePhase.value === 'finished') return '게임이 끝났습니다.';
+  if (!isMyTurn.value) return `${currentTurnName.value}의 차례입니다.`;
+  if (gamePhase.value === 'moving') return '결과와 말을 선택하세요.';
+  return '윷을 던질 차례입니다.';
+});
+
+const phaseDescription = computed(() => {
+  if (gamePhase.value === 'waiting') return '2명 이상 모이면 방장이 게임을 시작할 수 있습니다.';
+  if (gamePhase.value === 'finished') return '결과를 확인하고 다음 테이블로 이동하세요.';
+  if (!isMyTurn.value) return '상대의 이동이 끝날 때까지 기다려 주세요.';
+  if (gamePhase.value === 'moving') return '보유한 윷 결과 하나와 움직일 말을 선택하세요.';
+  return '초능력을 먼저 선택하거나 바로 던질 수 있습니다.';
+});
+
 const mySkills = computed(() => {
   if (!gameState.value || !mySessionId.value) return [];
-  const me = gameState.value.players[mySessionId.value];
-  return me ? me.skills : [];
+  return gameState.value.players[mySessionId.value]?.skills || [];
 });
 
 const myActiveSkill = computed(() => {
   if (!gameState.value || !mySessionId.value) return '';
-  const me = gameState.value.players[mySessionId.value];
-  return me ? me.activeSkill : '';
+  return gameState.value.players[mySessionId.value]?.activeSkill || '';
 });
 
 const skillInfo = {
-  MO_MAGNET: { name: '🧲 모 확정', desc: '다음 윷은 무조건 [모]가 터집니다.' },
-  DOUBLE_CAST: { name: '👯 복제 술법', desc: '다음 윷 결과를 2배로 복제합니다.' },
-  BACK_GEAR: { name: '⏪ 풀악셀 후진', desc: '다음 윷 숫자만큼 무자비하게 뒤로 갑니다.' },
-  EARTHQUAKE: { name: '💥 대지진', desc: '(즉발) 판 위의 모든 말을 대기실로 쳐박습니다.' },
-  TITAN_DROP: { name: '👣 무지성거인 투하', desc: '(즉발) 빈 칸에 길막용 거인을 떨어뜨립니다.' },
-  STEALTH_MODE: {
-    name: '👻 스텔스 모드',
-    desc: '이번에 이동하는 말을 투명 상태(잡히지 않음)로 만듭니다.',
-  },
+  MO_MAGNET: { name: '모 확정', desc: '다음 윷 결과를 모로 바꿉니다.' },
+  DOUBLE_CAST: { name: '복제 술법', desc: '다음 윷 결과를 한 번 더 얻습니다.' },
+  BACK_GEAR: { name: '풀악셀 후진', desc: '다음 결과만큼 뒤로 이동합니다.' },
+  EARTHQUAKE: { name: '대지진', desc: '판 위의 모든 말을 대기 위치로 돌려보냅니다.' },
+  TITAN_DROP: { name: '거인 투하', desc: '빈 칸에 이동을 막는 거인을 배치합니다.' },
+  STEALTH_MODE: { name: '스텔스 모드', desc: '이번에 이동하는 말을 잡히지 않는 상태로 만듭니다.' },
 };
 
 const activateSkill = (skillId) => {
   if (!isMyTurn.value || gamePhase.value !== 'throwing') {
-    return alert('초능력은 내 턴의 [윷 던지기] 직전에만 쓸 수 있습니다!');
+    return alert('초능력은 내 턴의 윷 던지기 전에 사용할 수 있습니다.');
   }
-  if (props.gameConnection) {
-    props.gameConnection.send('activate_skill', skillId);
-  }
+  props.gameConnection?.send('activate_skill', skillId);
 };
 
 const myPieces = computed(() => {
   if (!gameState.value || !mySessionId.value) return [];
-  const me = gameState.value.players[mySessionId.value];
-  return me ? me.pieces : [];
+  return gameState.value.players[mySessionId.value]?.pieces || [];
 });
 
 const boardNodes = [
@@ -304,31 +368,25 @@ const boardNodes = [
   { x: 76.6, y: 76.6 },
 ];
 
-const getPieceX = (pos, index) => {
-  if (pos === 99) return 0;
-  return boardNodes[pos].x + (index % 2 === 0 ? -2 : 2);
+const getPieceX = (position, index) => {
+  if (position === 99) return 0;
+  return boardNodes[position].x + (index % 2 === 0 ? -2 : 2);
 };
-const getPieceY = (pos, index) => {
-  if (pos === 99) return 0;
-  return boardNodes[pos].y + (index < 2 ? -2 : 2);
+
+const getPieceY = (position, index) => {
+  if (position === 99) return 0;
+  return boardNodes[position].y + (index < 2 ? -2 : 2);
 };
 
 const isCorner = (index) => [0, 5, 10, 15, 22].includes(index);
 
-const isMyTurn = computed(() => {
-  return currentTurnId.value === props.gameConnection?.sessionId;
-});
-
 onMounted(() => {
-  if (props.gameConnection) {
-    setupGame();
-  }
+  if (props.gameConnection) setupGame();
 });
 
 const setupGame = () => {
   const connection = props.gameConnection;
   mySessionId.value = connection.sessionId;
-
   messages.value.push({ clientId: 'System', message: '윷놀이 방에 입장했습니다.' });
 
   connection.onStateChange((state) => {
@@ -336,8 +394,8 @@ const setupGame = () => {
     currentTurnId.value = state.currentTurnId;
     gamePhase.value = state.gamePhase;
     winnerSessionId.value = state.winnerSessionId;
-
     remainingThrows.value = state.remainingThrows || [];
+
     if (selectedThrowIndex.value >= remainingThrows.value.length) {
       selectedThrowIndex.value = 0;
     }
@@ -354,9 +412,7 @@ const setupGame = () => {
 };
 
 const throwYut = () => {
-  if (props.gameConnection && isMyTurn.value) {
-    props.gameConnection.send('throw_yut');
-  }
+  if (props.gameConnection && isMyTurn.value) props.gameConnection.send('throw_yut');
 };
 
 const startGame = () => {
@@ -366,20 +422,17 @@ const startGame = () => {
 };
 
 const returnToTable = () => {
-  if (props.gameConnection) {
-    props.gameConnection.send('return_to_table');
-  }
+  props.gameConnection?.send('return_to_table');
 };
 
 const movePiece = () => {
-  if (props.gameConnection && isMyTurn.value && gamePhase.value === 'moving') {
-    if (remainingThrows.value.length === 0) return;
+  if (!props.gameConnection || !isMyTurn.value || gamePhase.value !== 'moving') return;
+  if (!remainingThrows.value.length) return;
 
-    props.gameConnection.send('move_piece', {
-      pieceIndex: selectedPieceIndex.value,
-      throwIndex: selectedThrowIndex.value,
-    });
-  }
+  props.gameConnection.send('move_piece', {
+    pieceIndex: selectedPieceIndex.value,
+    throwIndex: selectedThrowIndex.value,
+  });
 };
 
 const sendMessage = () => {
@@ -388,9 +441,7 @@ const sendMessage = () => {
   inputMessage.value = '';
 };
 
-const leave = () => {
-  emit('leave-game');
-};
+const leave = () => emit('leave-game');
 
 const scrollToBottom = async () => {
   await nextTick();
@@ -398,925 +449,622 @@ const scrollToBottom = async () => {
 };
 
 const getThrowName = (steps) => {
-  const map = { '-1': '빽도', 1: '도', 2: '개', 3: '걸', 4: '윷', 5: '모' };
-  return map[steps] || steps;
+  const names = { '-1': '빽도', 1: '도', 2: '개', 3: '걸', 4: '윷', 5: '모' };
+  return names[steps] || steps;
 };
 </script>
 
 <style scoped>
-/* 기존 스타일은 그대로 유지 */
-.game-screen {
-  background: white;
-  padding: 30px;
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 2px solid #eee;
-  padding-bottom: 20px;
-  margin-bottom: 20px;
-}
-.leave-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.game-area {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-.board {
-  flex: 2;
-  background: #ecf0f1;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 300px;
-  border: 2px dashed #bdc3c7;
-}
-.controls {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.status-panel {
-  background: #f8f9fa;
-  padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #e9ecef;
-  text-align: center;
-}
-.my-turn {
-  color: #e74c3c;
-}
-.throw-btn {
-  background: #2ecc71;
-  color: white;
-  font-size: 1.5em;
-  font-weight: bold;
-  padding: 20px;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  box-shadow: 0 4px 0 #27ae60;
-  transition: all 0.1s;
-}
-.throw-btn:active {
-  transform: translateY(4px);
-  box-shadow: none;
-}
-.mini-chat {
-  border: 1px solid #eee;
-  border-radius: 8px;
-  padding: 10px;
-}
-.chat-box {
-  height: 150px;
-  overflow-y: auto;
-  margin-bottom: 10px;
-  font-size: 0.9em;
-}
-.system {
-  color: #9b59b6;
-  font-weight: bold;
-}
-form {
-  display: flex;
-  gap: 10px;
-}
-input {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-button[type='submit'] {
-  background: #95a5a6;
-  color: white;
-  border: none;
-  padding: 0 15px;
-  border-radius: 4px;
-}
-
-/* SVG 보드판 스타일 */
-.yut-board-svg {
-  width: 100%;
-  max-width: 400px;
-  height: auto;
-  display: block;
-  margin: 0 auto;
-}
-.board-line {
-  fill: none;
-  stroke: #bdc3c7;
-  stroke-width: 0.5;
-}
-.node-circle {
-  fill: #ecf0f1;
-  stroke: #7f8c8d;
-  stroke-width: 1;
-  transition: all 0.3s;
-}
-.start-node {
-  fill: #f39c12;
-  stroke: #e67e22;
-  stroke-width: 1.5;
-}
-.corner-node {
-  fill: #3498db;
-}
-.node-text {
-  font-size: 3px;
-  font-weight: bold;
-  fill: #2c3e50;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-}
-
-/* 말 스타일 */
-.player-piece {
-  stroke: white;
-  stroke-width: 0.8;
-  transition: all 0.5s ease-in-out;
-}
-.player-piece.red {
-  fill: #e74c3c;
-}
-.player-piece.blue {
-  fill: #3498db;
-}
-.highlighted {
-  stroke: #f1c40f !important;
-  stroke-width: 2.5px !important;
-  filter: drop-shadow(0 0 4px #f1c40f);
-}
-
-/* 🔥 SVG 환경에 맞춘 무지성거인 아이콘 */
-.titan-icon {
-  font-size: 7px;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-  filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.8));
-}
-
-/* 🔥 SVG 환경에 맞춘 스텔스 말 시각 효과 (반투명 + 점선 테두리) */
-.stealth-active {
-  opacity: 0.4;
-  stroke: #fff !important;
-  stroke-dasharray: 1 1;
-  stroke-width: 1.2px !important;
-}
-
-/* 말 선택기 스타일 */
-.piece-selection {
-  margin-top: 15px;
-  border-top: 2px dashed #eee;
-  padding-top: 15px;
-}
-.pieces-row {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-}
-.piece-selector {
-  padding: 8px;
-  border: 2px solid #ddd;
-  border-radius: 8px;
-  cursor: pointer;
-  background: white;
-  flex: 1;
-  transition: all 0.2s;
-  position: relative;
-}
-.piece-selector:hover:not(.finished) {
-  border-color: #3498db;
-}
-.piece-selector.selected {
-  border-color: #e74c3c;
-  background: #ffeaa7;
-  font-weight: bold;
-  transform: translateY(-2px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-.piece-selector.finished {
-  opacity: 0.5;
-  cursor: not-allowed;
-  background: #f9f9f9;
-}
-.pos-text {
-  font-size: 0.8em;
-  color: #7f8c8d;
-  margin-top: 4px;
-}
-.stealth-badge {
-  font-size: 0.7em;
-  color: #9b59b6;
-  font-weight: bold;
-  margin-top: 4px;
-}
-.piece-selector.stealth-ui {
-  border-color: #9b59b6;
-  background: #fdfaf6;
-}
-
-.move-btn {
-  background: #9b59b6;
-  color: white;
-  font-size: 1.5em;
-  font-weight: bold;
-  padding: 20px;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  box-shadow: 0 4px 0 #8e44ad;
-  transition: all 0.1s;
-}
-.move-btn:active {
-  transform: translateY(4px);
-  box-shadow: none;
-}
-
-.throw-stack {
-  margin-top: 15px;
-  border-top: 2px dashed #eee;
-  padding-top: 15px;
-}
-.stack-row {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.stack-item {
-  background: #ecf0f1;
-  padding: 10px 20px;
-  border-radius: 20px;
-  font-weight: bold;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.2s;
-}
-.stack-item:hover {
-  border-color: #bdc3c7;
-}
-.stack-item.selected {
-  background: #34495e;
-  color: white;
-  border-color: #2c3e50;
-  transform: scale(1.1);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-}
-
-.game-over-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 9999;
-  backdrop-filter: blur(5px);
-}
-.game-over-modal {
-  background: white;
-  padding: 50px;
-  border-radius: 20px;
-  text-align: center;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-@keyframes popIn {
-  0% {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-.win-title {
-  color: #f1c40f;
-  font-size: 2.5em;
-  margin-bottom: 10px;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-.lose-title {
-  color: #e74c3c;
-  font-size: 2.5em;
-  margin-bottom: 10px;
-}
-.sub-text {
-  font-size: 1.2em;
-  color: #555;
-  margin-bottom: 30px;
-}
-.return-btn {
-  background: #34495e;
-  color: white;
-  border: none;
-  padding: 15px 30px;
-  font-size: 1.2em;
-  font-weight: bold;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.return-btn:hover {
-  background: #2c3e50;
-}
-.action-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 20px;
-}
-.leave-btn-small {
-  background: transparent;
-  color: #95a5a6;
-  border: 1px solid #bdc3c7;
-  padding: 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.leave-btn-small:hover {
-  background: #ecf0f1;
-  color: #e74c3c;
-  border-color: #e74c3c;
-}
-
-.skills-section {
-  margin-top: 15px;
-  padding: 15px;
-  background: #2c3e50;
-  border-radius: 12px;
-  color: white;
-}
-.skills-section h4 {
-  margin: 0 0 10px 0;
-  color: #f1c40f;
-}
-.skills-row {
-  display: flex;
-  gap: 10px;
-}
-.skill-card {
-  flex: 1;
-  padding: 10px;
-  background: linear-gradient(135deg, #34495e, #2c3e50);
-  border: 2px solid #7f8c8d;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.skill-card:hover:not(.disabled) {
-  border-color: #f1c40f;
-  transform: translateY(-3px);
-  box-shadow: 0 5px 15px rgba(241, 196, 15, 0.3);
-}
-.skill-name {
-  font-weight: bold;
-  font-size: 1.1em;
-  margin-bottom: 5px;
-  color: #ecf0f1;
-}
-.skill-desc {
-  font-size: 0.75em;
-  color: #bdc3c7;
-  line-height: 1.3;
-}
-.skill-card.active {
-  border-color: #e74c3c;
-  background: linear-gradient(135deg, #c0392b, #e74c3c);
-  box-shadow: 0 0 15px rgba(231, 76, 60, 0.6);
-}
-.skill-card.disabled {
-  opacity: 0.5;
-  filter: grayscale(100%);
-  cursor: not-allowed;
-}
-.active-skill-notice {
-  margin-top: 10px;
-  color: #e74c3c;
-  font-weight: bold;
-  font-size: 1.1em;
-  text-align: center;
-}
-</style>
-
-<style scoped>
-/* Notion 기반 UI 리프레시: 게임 로직과 SVG 보드는 유지하고 표현만 통일합니다. */
-.game-screen {
+.yut-game {
   display: grid;
-  gap: var(--space-6);
-  padding: var(--space-6);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-surface);
+  gap: var(--space-5);
   color: var(--color-ink);
-  box-shadow: var(--shadow-card);
 }
 
-.header {
+.game-topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.eyebrow,
+.panel-caption {
+  margin: 0 0 var(--space-1);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.game-topbar h1 {
   margin: 0;
-  padding: 0 0 var(--space-5);
-  border-bottom: 1px solid var(--color-border-soft);
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1;
+  letter-spacing: -0.035em;
 }
 
-.header h1 {
-  margin: 0;
-  font-size: clamp(30px, 4.5vw, 46px);
-  line-height: 1.05;
-  letter-spacing: -0.04em;
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.leave-btn {
+.turn-status {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in oklab, var(--color-primary), var(--color-border) 74%);
+  border-radius: var(--radius-small);
+  background: color-mix(in oklab, var(--color-primary) 6%, white);
+}
+
+.turn-status span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.leave-button,
+.button {
   min-height: 44px;
-  padding: 0 var(--space-4);
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--color-surface);
-  color: var(--color-danger);
+  padding: 0 var(--space-4);
   font-size: 14px;
   font-weight: 700;
+  cursor: pointer;
 }
 
-.leave-btn:hover {
-  border-color: rgba(201, 54, 43, 0.28);
+.leave-button,
+.button-secondary {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-danger);
+}
+
+.leave-button:hover,
+.button-secondary:hover {
+  border-color: color-mix(in oklab, var(--color-danger), var(--color-border) 68%);
   background: #fff7f6;
 }
 
-.game-area {
+.play-grid {
   display: grid;
-  grid-template-columns: minmax(360px, 1.25fr) minmax(300px, 0.75fr);
-  gap: var(--space-6);
-  margin: 0;
+  grid-template-columns: minmax(460px, 1fr) minmax(320px, 400px);
+  gap: var(--space-4);
   align-items: start;
 }
 
-.board {
-  min-height: 0;
-  aspect-ratio: 1;
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-surface-muted);
-}
-
-.yut-board-svg {
-  width: min(100%, 560px);
-  max-width: none;
-}
-
-.board-line {
-  stroke: #a39e98;
-  stroke-width: 0.45;
-}
-
-.node-circle {
-  fill: #ffffff;
-  stroke: #8f8984;
-  stroke-width: 0.8;
-}
-
-.start-node {
-  fill: #fff3db;
-  stroke: var(--color-warning);
-}
-
-.corner-node {
-  fill: #f2f9ff;
-  stroke: var(--color-primary);
-}
-
-.node-text {
-  fill: var(--color-ink-soft);
-  font-weight: 700;
-}
-
-.player-piece {
-  stroke: #ffffff;
-  stroke-width: 1;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.16));
-}
-
-.player-piece.red {
-  fill: #c9362b;
-}
-
-.player-piece.blue {
-  fill: #0075de;
-}
-
-.highlighted {
-  stroke: #ffd43b !important;
-  stroke-width: 2.4px !important;
-  filter: drop-shadow(0 0 4px rgba(221, 91, 0, 0.42));
-}
-
-.controls {
-  gap: var(--space-3);
-}
-
-.status-panel {
-  padding: var(--space-5);
+.board-panel,
+.control-panel,
+.chat-panel {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
-  text-align: left;
 }
 
-.status-panel h2 {
-  margin-bottom: var(--space-4);
-  font-size: clamp(21px, 2.5vw, 27px);
-  line-height: 1.2;
+.board-panel {
+  min-height: 690px;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  padding: var(--space-5);
+  background: color-mix(in oklab, var(--color-surface-muted) 62%, white);
 }
 
-.my-turn {
-  color: var(--color-primary);
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
-.waiting-copy,
-.waiting-notice {
-  margin: 0 0 var(--space-4);
+.board-heading {
+  align-items: flex-start;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.015em;
+}
+
+.panel-heading > span {
   color: var(--color-muted);
-  line-height: 1.6;
+  font-size: 13px;
 }
 
-.start-btn {
-  width: 100%;
-  min-height: 48px;
-  border: 0;
-  border-radius: var(--radius-control);
+.board-legend {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.board-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legend-dot.blue {
   background: var(--color-primary);
-  color: white;
-  font-size: 15px;
+}
+
+.legend-dot.red {
+  background: var(--color-danger);
+}
+
+.board-frame {
+  width: min(100%, 680px);
+  aspect-ratio: 1;
+  align-self: center;
+  justify-self: center;
+}
+
+.yut-board-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.board-line {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 1.3;
+}
+
+.node-circle {
+  fill: white;
+  stroke: var(--color-ink-soft);
+  stroke-width: 1;
+}
+
+.start-node,
+.corner-node {
+  fill: var(--color-ink-soft);
+}
+
+.node-text {
+  fill: var(--color-muted);
+  font: 3px ui-monospace, 'SF Mono', Consolas, monospace;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.start-node + .node-text,
+.corner-node + .node-text {
+  fill: white;
+}
+
+.titan-icon {
+  font-size: 7px;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.player-piece {
+  stroke: white;
+  stroke-width: 1.2;
+  transition:
+    cx 200ms cubic-bezier(0.2, 0, 0, 1),
+    cy 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.player-piece.blue {
+  fill: var(--color-primary);
+}
+
+.player-piece.red {
+  fill: var(--color-danger);
+}
+
+.player-piece.green {
+  fill: var(--color-success);
+}
+
+.player-piece.yellow {
+  fill: var(--color-warning);
+}
+
+.player-piece.highlighted {
+  stroke: var(--color-ink);
+  stroke-width: 2.4;
+}
+
+.player-piece.stealth-active {
+  opacity: 0.45;
+  stroke-dasharray: 2 1;
+}
+
+.controls-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.control-panel,
+.chat-panel {
+  padding: var(--space-4);
+}
+
+.phase-copy {
+  padding: var(--space-3);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+}
+
+.phase-copy strong,
+.phase-copy span {
+  display: block;
+}
+
+.phase-copy span {
+  margin-top: var(--space-1);
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.waiting-actions {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.waiting-actions p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.control-section {
+  margin-top: var(--space-5);
+}
+
+.control-section h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.skill-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.skill-button {
+  min-height: 62px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-button:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+}
+
+.skill-button.active {
+  border-color: color-mix(in oklab, var(--color-warning), var(--color-border) 60%);
+  background: color-mix(in oklab, var(--color-warning) 7%, white);
+}
+
+.skill-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.skill-button strong,
+.skill-button small {
+  display: block;
+}
+
+.skill-button small {
+  margin-top: 2px;
+  color: var(--color-muted);
+  line-height: 1.35;
+}
+
+.skill-button code {
+  color: var(--color-warning);
+  font: 700 11px/1 ui-monospace, 'SF Mono', Consolas, monospace;
+}
+
+.active-skill-notice {
+  margin: var(--space-2) 0 0;
+  color: var(--color-warning);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.throw-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.throw-choice {
+  min-height: 52px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink);
   font-weight: 700;
   cursor: pointer;
 }
 
-.start-btn:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+.throw-choice.selected {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: white;
 }
 
-.start-btn:disabled {
-  background: var(--color-border);
-  color: var(--color-muted);
+.throw-choice:disabled {
   cursor: not-allowed;
+  opacity: 0.46;
 }
 
-.piece-selection,
-.throw-stack {
-  margin-top: var(--space-4);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border-soft);
-}
-
-.piece-selection h4,
-.throw-stack h4 {
-  margin-bottom: var(--space-3);
-  color: var(--color-muted);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.pieces-row {
+.piece-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-2);
 }
 
-.piece-selector {
-  min-width: 0;
-  padding: var(--space-3) var(--space-2);
+.piece-choice {
+  min-height: 62px;
+  padding: var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-small);
-  background: var(--color-surface);
-  text-align: center;
-}
-
-.piece-selector:hover:not(.finished) {
-  border-color: rgba(0, 117, 222, 0.42);
-  background: #f8fbff;
-}
-
-.piece-selector.selected {
-  border-color: var(--color-primary);
-  background: #f2f9ff;
-  color: var(--color-primary-hover);
-  box-shadow: inset 0 0 0 1px rgba(0, 117, 222, 0.12);
-  transform: none;
-}
-
-.piece-selector.finished {
+  border-radius: var(--radius-control);
   background: var(--color-surface-muted);
+  color: var(--color-ink);
+  cursor: pointer;
 }
 
-.piece-selector.stealth-ui {
-  border-color: rgba(109, 74, 255, 0.4);
-  background: #f7f5ff;
+.piece-choice strong,
+.piece-choice span,
+.piece-choice small {
+  display: block;
 }
 
-.pos-text {
+.piece-choice span,
+.piece-choice small {
   color: var(--color-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
-.stealth-badge {
-  color: var(--color-purple);
+.piece-choice.selected {
+  border-color: color-mix(in oklab, var(--color-primary), var(--color-border) 62%);
+  background: color-mix(in oklab, var(--color-primary) 7%, white);
 }
 
-.stack-row {
-  justify-content: flex-start;
-  gap: var(--space-2);
+.piece-choice.stealth {
+  border-color: color-mix(in oklab, var(--color-purple), var(--color-border) 65%);
 }
 
-.stack-item {
-  padding: 7px var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  background: var(--color-surface-muted);
-  font-size: 13px;
+.piece-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
-.stack-item:hover {
-  border-color: var(--color-meta);
-}
-
-.stack-item.selected {
-  border-color: var(--color-ink);
-  background: var(--color-ink);
-  color: white;
-  box-shadow: none;
-  transform: none;
-}
-
-.skills-section {
-  margin-top: var(--space-4);
-  padding: var(--space-4);
-  border-radius: var(--radius-small);
-  background: var(--color-ink-soft);
-}
-
-.skills-section h4 {
-  margin-bottom: var(--space-3);
-  color: #ffffff;
-  font-size: 13px;
-}
-
-.skills-row {
+.primary-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-2);
+  margin-top: var(--space-5);
 }
 
-.skill-card {
-  min-width: 0;
-  padding: var(--space-3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-control);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.skill-card:hover:not(.disabled) {
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: none;
-  transform: none;
-}
-
-.skill-card.active {
-  border-color: #62aef0;
-  background: rgba(0, 117, 222, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(98, 174, 240, 0.28);
-}
-
-.skill-name {
-  color: white;
-  font-size: 14px;
-}
-
-.skill-desc {
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.active-skill-notice {
-  color: #8fc9ff;
-  font-size: 13px;
-}
-
-.throw-btn,
-.move-btn {
-  min-height: 58px;
-  padding: 0 var(--space-5);
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
+.button-primary {
+  min-height: 48px;
   background: var(--color-primary);
   color: white;
-  box-shadow: none;
-  font-size: 17px;
-  font-weight: 700;
+  box-shadow: var(--shadow-card);
 }
 
-.throw-btn:hover,
-.move-btn:hover {
+.button-primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
 }
 
-.throw-btn:active,
-.move-btn:active {
-  box-shadow: none;
-  transform: scale(0.98);
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
-.mini-chat {
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-surface);
-}
-
-.chat-box {
-  height: 156px;
-  margin-bottom: var(--space-3);
-  padding: var(--space-2);
-  border-radius: var(--radius-small);
-  background: var(--color-surface-muted);
-  color: var(--color-ink-soft);
-}
-
-.message {
-  padding: var(--space-2);
+.chat-log {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border-soft);
   border-bottom: 1px solid var(--color-border-soft);
+}
+
+.message-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.3fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  font-size: 13px;
   line-height: 1.45;
 }
 
-.message:last-child {
+.message-row:last-child {
   border-bottom: 0;
+}
+
+.message-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-row span,
+.chat-empty {
+  color: var(--color-muted);
 }
 
 .system {
   color: var(--color-focus);
 }
 
-form {
-  gap: var(--space-2);
+.chat-empty {
+  margin: 0;
+  padding: var(--space-5) 0;
+  text-align: center;
+  font-size: 13px;
 }
 
-input {
+.chat-form {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.chat-form input {
   min-width: 0;
   min-height: 44px;
+  flex: 1;
   padding: 0 var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
-  background: white;
+  background: var(--color-surface);
   color: var(--color-ink);
   font-size: 16px;
 }
 
-input:focus {
-  border-color: var(--color-primary);
+.chat-form input::placeholder {
+  color: var(--color-meta);
 }
 
-button[type='submit'] {
-  min-height: 44px;
-  padding: 0 var(--space-4);
+.chat-form button {
+  min-width: 68px;
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: var(--color-ink);
+  color: white;
   font-weight: 700;
   cursor: pointer;
 }
 
-.game-over-overlay {
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
   padding: var(--space-4);
-  background: rgba(49, 48, 46, 0.74);
-  backdrop-filter: blur(8px);
+  background: rgba(49, 48, 46, 0.42);
+  backdrop-filter: blur(6px);
 }
 
-.game-over-modal {
+.result-modal {
   width: min(100%, 520px);
   padding: clamp(28px, 6vw, 48px);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-large);
-  background: white;
+  background: var(--color-surface);
   box-shadow: var(--shadow-card);
 }
 
-.win-title,
-.lose-title {
-  margin-bottom: var(--space-3);
-  font-size: clamp(30px, 7vw, 44px);
-  text-shadow: none;
+.result-modal h2 {
+  margin: 0;
+  font-size: clamp(30px, 6vw, 44px);
+  letter-spacing: -0.035em;
 }
 
-.win-title {
-  color: var(--color-warning);
-}
-
-.lose-title {
-  color: var(--color-danger);
-}
-
-.sub-text {
-  margin-bottom: var(--space-4);
-  color: var(--color-muted);
-  font-size: 16px;
-}
-
-.return-btn,
-.leave-btn-small {
-  min-height: 46px;
-  border-radius: var(--radius-control);
-  font-size: 14px;
-}
-
-.return-btn {
-  background: var(--color-primary);
-}
-
-.return-btn:hover {
-  background: var(--color-primary-hover);
-}
-
-.leave-btn-small {
-  border-color: var(--color-border);
+.result-modal > p:not(.eyebrow) {
+  margin: var(--space-3) 0 0;
   color: var(--color-muted);
 }
 
-@media (max-width: 920px) {
-  .game-area {
+.result-actions {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.result-actions .button-secondary {
+  color: var(--color-muted);
+}
+
+@media (max-width: 1050px) {
+  .play-grid {
     grid-template-columns: 1fr;
   }
 
-  .board {
-    width: min(100%, 680px);
-    justify-self: center;
+  .board-panel {
+    min-height: auto;
   }
 }
 
-@media (max-width: 600px) {
-  .game-screen {
-    padding: var(--space-4);
-  }
-
-  .header {
+@media (max-width: 720px) {
+  .game-topbar {
     align-items: flex-start;
-    gap: var(--space-4);
-  }
-
-  .header h1 {
-    font-size: 30px;
-  }
-
-  .leave-btn {
-    padding: 0 var(--space-3);
-  }
-
-  .board {
-    padding: var(--space-3);
-  }
-
-  .status-panel {
-    padding: var(--space-4);
-  }
-
-  .pieces-row,
-  .skills-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  form {
     flex-direction: column;
   }
 
-  button[type='submit'] {
+  .topbar-actions {
     width: 100%;
+    align-items: stretch;
+  }
+
+  .turn-status {
+    min-width: 0;
+    flex: 1;
+    justify-content: space-between;
+  }
+
+  .board-panel {
+    padding: var(--space-3);
+  }
+
+  .board-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .piece-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-actions,
+  .chat-form {
+    flex-direction: column;
+  }
+
+  .leave-button,
+  .chat-form button {
+    width: 100%;
+  }
+
+  .throw-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .message-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .player-piece,
-  .skill-card,
-  .piece-selector,
-  .game-over-modal {
-    animation: none;
+  .player-piece {
     transition: none;
   }
 }
