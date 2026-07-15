@@ -10,7 +10,7 @@
         <template v-else>
           <h1 class="lose-title">💀 처참한 패배... 💀</h1>
           <p class="sub-text">
-            승리자: <strong>{{ winnerSessionId }}</strong>
+            승리자: <strong>{{ winnerName }}</strong>
           </p>
           <p class="sub-text">다음엔 꼭 복수하세요.</p>
         </template>
@@ -88,7 +88,20 @@
 
       <div class="controls">
         <div class="status-panel">
-          <h2 v-if="isMyTurn && gamePhase === 'throwing'" class="my-turn blink">
+          <template v-if="gamePhase === 'waiting'">
+            <h2>함께할 플레이어를 기다리는 중</h2>
+            <p class="waiting-copy">현재 {{ playerCount }}명 · 2명 이상이면 시작할 수 있습니다.</p>
+            <button
+              v-if="isHost"
+              class="start-btn"
+              :disabled="playerCount < 2"
+              @click="startGame"
+            >
+              윷놀이 시작
+            </button>
+            <p v-else class="waiting-notice">방장이 게임을 시작할 때까지 잠시 기다려 주세요.</p>
+          </template>
+          <h2 v-else-if="isMyTurn && gamePhase === 'throwing'" class="my-turn blink">
             🔥 윷을 던지세요!
           </h2>
           <h2 v-else-if="isMyTurn && gamePhase === 'moving'" class="my-turn blink">
@@ -207,6 +220,18 @@ const mySessionId = ref('');
 
 const remainingThrows = ref([]);
 const selectedThrowIndex = ref(0);
+
+const myPlayer = computed(() => {
+  if (!gameState.value || !mySessionId.value) return null;
+  return gameState.value.players[mySessionId.value] ?? null;
+});
+
+const playerCount = computed(() => Object.keys(gameState.value?.players ?? {}).length);
+const isHost = computed(() => Boolean(myPlayer.value?.isHost));
+const winnerName = computed(() => {
+  const winner = gameState.value?.players?.[winnerSessionId.value];
+  return winner?.nickname || winnerSessionId.value;
+});
 
 const mySkills = computed(() => {
   if (!gameState.value || !mySessionId.value) return [];
@@ -331,6 +356,12 @@ const setupGame = () => {
 const throwYut = () => {
   if (props.gameConnection && isMyTurn.value) {
     props.gameConnection.send('throw_yut');
+  }
+};
+
+const startGame = () => {
+  if (props.gameConnection && isHost.value && playerCount.value >= 2) {
+    props.gameConnection.send('start_game');
   }
 };
 
@@ -785,5 +816,508 @@ button[type='submit'] {
   font-weight: bold;
   font-size: 1.1em;
   text-align: center;
+}
+</style>
+
+<style scoped>
+/* Notion 기반 UI 리프레시: 게임 로직과 SVG 보드는 유지하고 표현만 통일합니다. */
+.game-screen {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-card);
+}
+
+.header {
+  margin: 0;
+  padding: 0 0 var(--space-5);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: clamp(30px, 4.5vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.leave-btn {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-danger);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.leave-btn:hover {
+  border-color: rgba(201, 54, 43, 0.28);
+  background: #fff7f6;
+}
+
+.game-area {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.25fr) minmax(300px, 0.75fr);
+  gap: var(--space-6);
+  margin: 0;
+  align-items: start;
+}
+
+.board {
+  min-height: 0;
+  aspect-ratio: 1;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-muted);
+}
+
+.yut-board-svg {
+  width: min(100%, 560px);
+  max-width: none;
+}
+
+.board-line {
+  stroke: #a39e98;
+  stroke-width: 0.45;
+}
+
+.node-circle {
+  fill: #ffffff;
+  stroke: #8f8984;
+  stroke-width: 0.8;
+}
+
+.start-node {
+  fill: #fff3db;
+  stroke: var(--color-warning);
+}
+
+.corner-node {
+  fill: #f2f9ff;
+  stroke: var(--color-primary);
+}
+
+.node-text {
+  fill: var(--color-ink-soft);
+  font-weight: 700;
+}
+
+.player-piece {
+  stroke: #ffffff;
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.16));
+}
+
+.player-piece.red {
+  fill: #c9362b;
+}
+
+.player-piece.blue {
+  fill: #0075de;
+}
+
+.highlighted {
+  stroke: #ffd43b !important;
+  stroke-width: 2.4px !important;
+  filter: drop-shadow(0 0 4px rgba(221, 91, 0, 0.42));
+}
+
+.controls {
+  gap: var(--space-3);
+}
+
+.status-panel {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  text-align: left;
+}
+
+.status-panel h2 {
+  margin-bottom: var(--space-4);
+  font-size: clamp(21px, 2.5vw, 27px);
+  line-height: 1.2;
+}
+
+.my-turn {
+  color: var(--color-primary);
+}
+
+.waiting-copy,
+.waiting-notice {
+  margin: 0 0 var(--space-4);
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.start-btn {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-primary);
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.start-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.start-btn:disabled {
+  background: var(--color-border);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.piece-selection,
+.throw-stack {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.piece-selection h4,
+.throw-stack h4 {
+  margin-bottom: var(--space-3);
+  color: var(--color-muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pieces-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.piece-selector {
+  min-width: 0;
+  padding: var(--space-3) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+.piece-selector:hover:not(.finished) {
+  border-color: rgba(0, 117, 222, 0.42);
+  background: #f8fbff;
+}
+
+.piece-selector.selected {
+  border-color: var(--color-primary);
+  background: #f2f9ff;
+  color: var(--color-primary-hover);
+  box-shadow: inset 0 0 0 1px rgba(0, 117, 222, 0.12);
+  transform: none;
+}
+
+.piece-selector.finished {
+  background: var(--color-surface-muted);
+}
+
+.piece-selector.stealth-ui {
+  border-color: rgba(109, 74, 255, 0.4);
+  background: #f7f5ff;
+}
+
+.pos-text {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.stealth-badge {
+  color: var(--color-purple);
+}
+
+.stack-row {
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+
+.stack-item {
+  padding: 7px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-muted);
+  font-size: 13px;
+}
+
+.stack-item:hover {
+  border-color: var(--color-meta);
+}
+
+.stack-item.selected {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: white;
+  box-shadow: none;
+  transform: none;
+}
+
+.skills-section {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-small);
+  background: var(--color-ink-soft);
+}
+
+.skills-section h4 {
+  margin-bottom: var(--space-3);
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.skills-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.skill-card {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.skill-card:hover:not(.disabled) {
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: none;
+  transform: none;
+}
+
+.skill-card.active {
+  border-color: #62aef0;
+  background: rgba(0, 117, 222, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(98, 174, 240, 0.28);
+}
+
+.skill-name {
+  color: white;
+  font-size: 14px;
+}
+
+.skill-desc {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.active-skill-notice {
+  color: #8fc9ff;
+  font-size: 13px;
+}
+
+.throw-btn,
+.move-btn {
+  min-height: 58px;
+  padding: 0 var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-primary);
+  color: white;
+  box-shadow: none;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.throw-btn:hover,
+.move-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.throw-btn:active,
+.move-btn:active {
+  box-shadow: none;
+  transform: scale(0.98);
+}
+
+.mini-chat {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.chat-box {
+  height: 156px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+  color: var(--color-ink-soft);
+}
+
+.message {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border-soft);
+  line-height: 1.45;
+}
+
+.message:last-child {
+  border-bottom: 0;
+}
+
+.system {
+  color: var(--color-focus);
+}
+
+form {
+  gap: var(--space-2);
+}
+
+input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: white;
+  color: var(--color-ink);
+  font-size: 16px;
+}
+
+input:focus {
+  border-color: var(--color-primary);
+}
+
+button[type='submit'] {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--color-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.game-over-overlay {
+  padding: var(--space-4);
+  background: rgba(49, 48, 46, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.game-over-modal {
+  width: min(100%, 520px);
+  padding: clamp(28px, 6vw, 48px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-large);
+  background: white;
+  box-shadow: var(--shadow-card);
+}
+
+.win-title,
+.lose-title {
+  margin-bottom: var(--space-3);
+  font-size: clamp(30px, 7vw, 44px);
+  text-shadow: none;
+}
+
+.win-title {
+  color: var(--color-warning);
+}
+
+.lose-title {
+  color: var(--color-danger);
+}
+
+.sub-text {
+  margin-bottom: var(--space-4);
+  color: var(--color-muted);
+  font-size: 16px;
+}
+
+.return-btn,
+.leave-btn-small {
+  min-height: 46px;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+
+.return-btn {
+  background: var(--color-primary);
+}
+
+.return-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.leave-btn-small {
+  border-color: var(--color-border);
+  color: var(--color-muted);
+}
+
+@media (max-width: 920px) {
+  .game-area {
+    grid-template-columns: 1fr;
+  }
+
+  .board {
+    width: min(100%, 680px);
+    justify-self: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .game-screen {
+    padding: var(--space-4);
+  }
+
+  .header {
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+
+  .header h1 {
+    font-size: 30px;
+  }
+
+  .leave-btn {
+    padding: 0 var(--space-3);
+  }
+
+  .board {
+    padding: var(--space-3);
+  }
+
+  .status-panel {
+    padding: var(--space-4);
+  }
+
+  .pieces-row,
+  .skills-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  form {
+    flex-direction: column;
+  }
+
+  button[type='submit'] {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-piece,
+  .skill-card,
+  .piece-selector,
+  .game-over-modal {
+    animation: none;
+    transition: none;
+  }
 }
 </style>

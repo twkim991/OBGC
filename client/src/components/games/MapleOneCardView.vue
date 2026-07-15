@@ -85,9 +85,17 @@
     </section>
 
     <section class="controls">
-      <button v-if="state?.gamePhase === 'waiting'" class="primary-btn" @click="startGame">
+      <button
+        v-if="state?.gamePhase === 'waiting' && isHost"
+        class="primary-btn"
+        :disabled="players.length < 2"
+        @click="startGame"
+      >
         게임 시작
       </button>
+      <p v-else-if="state?.gamePhase === 'waiting'" class="waiting-notice">
+        방장이 게임을 시작할 때까지 기다려 주세요. 현재 {{ players.length }}명
+      </p>
       <button
         v-if="state?.gamePhase === 'playing' && isMyTurn"
         class="accent-btn"
@@ -114,13 +122,14 @@
       </div>
     </section>
 
-    <section v-if="state?.ended" class="result">
+    <section v-if="state?.gamePhase === 'finished'" class="result">
       <h3>게임 종료</h3>
       <ol>
         <li v-for="sid in state.rankings" :key="sid">
           {{ getPlayerName(sid) }}
         </li>
       </ol>
+      <button class="primary-btn" @click="returnToTable">멤버 그대로 테이블로 복귀</button>
     </section>
 
     <section class="chat-box">
@@ -139,6 +148,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 const props = defineProps({
   gameConnection: { type: Object, required: true },
 });
+const emit = defineEmits(['move-to-game']);
 
 const room = computed(() => props.gameConnection ?? null);
 const mySessionId = computed(() => props.gameConnection?.sessionId ?? '');
@@ -168,7 +178,7 @@ watch(
     });
 
     nextRoom.onMessage('move_room', (data) => {
-      console.log('move_room', data);
+      emit('move-to-game', data);
     });
 
     boundRoomId = nextRoom.roomId;
@@ -182,6 +192,7 @@ const players = computed(() => {
 });
 
 const myPlayer = computed(() => players.value.find((p) => p.sessionId === mySessionId.value));
+const isHost = computed(() => Boolean(myPlayer.value?.isHost));
 
 const myHand = computed(() => myPlayer.value?.hand || []);
 
@@ -288,9 +299,14 @@ function canPlay(card) {
 }
 
 function startGame() {
-  if (!room.value) return;
+  if (!room.value || !isHost.value || players.value.length < 2) return;
   tryPlayBgm();
   room.value.send('start_game');
+}
+
+function returnToTable() {
+  if (!room.value) return;
+  room.value.send('return_to_table');
 }
 
 function drawCard() {
@@ -947,6 +963,455 @@ onBeforeUnmount(() => {
 
   .table-card {
     min-height: 140px;
+  }
+}
+</style>
+
+<style scoped>
+/* Notion 기반 UI 리프레시: 카드 규칙과 Colyseus 메시지는 그대로 유지합니다. */
+.onecard-wrap {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-card);
+}
+
+.game-header {
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.eyebrow {
+  margin-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+
+.game-header h2 {
+  margin: 0;
+  color: var(--color-ink);
+  font-size: clamp(30px, 4.5vw, 46px);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.turn-chip {
+  min-width: 160px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+}
+
+.turn-chip.mine {
+  border-color: rgba(0, 117, 222, 0.36);
+  background: #f2f9ff;
+  box-shadow: inset 0 0 0 1px rgba(0, 117, 222, 0.08);
+}
+
+.turn-label {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.status-grid {
+  grid-template-columns: minmax(150px, 0.55fr) minmax(150px, 0.55fr) minmax(240px, 1.4fr);
+  gap: var(--space-3);
+}
+
+.status-card {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+}
+
+.status-card-wide {
+  grid-column: auto;
+}
+
+.status-title {
+  margin-bottom: var(--space-2);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-value {
+  color: var(--color-ink);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.status-value.danger {
+  color: var(--color-danger);
+}
+
+.status-value.subdued {
+  color: var(--color-ink-soft);
+}
+
+.color-pill {
+  min-width: 76px;
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+}
+
+.play-area {
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+  gap: var(--space-4);
+}
+
+.board-panel {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.board-panel h3,
+.my-hand h3,
+.chat-box h3,
+.result h3 {
+  color: var(--color-ink);
+  font-size: 17px;
+  letter-spacing: -0.015em;
+}
+
+.table-card {
+  min-height: 220px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-card);
+}
+
+.table-card.empty {
+  color: var(--color-meta);
+  box-shadow: none;
+}
+
+.players {
+  margin-top: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-2);
+}
+
+.player-box {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+  color: var(--color-ink);
+}
+
+.player-box.current {
+  border-color: rgba(221, 91, 0, 0.42);
+  background: #fff9f4;
+  box-shadow: inset 0 0 0 1px rgba(221, 91, 0, 0.08);
+}
+
+.player-box.me {
+  border-color: rgba(0, 117, 222, 0.36);
+}
+
+.me-badge {
+  background: #f2f9ff;
+  color: var(--color-focus);
+}
+
+.player-meta {
+  color: var(--color-muted);
+}
+
+.player-bankrupt {
+  color: var(--color-danger);
+}
+
+.my-hand {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-muted);
+}
+
+.section-title-row {
+  margin-bottom: var(--space-3);
+}
+
+.section-title-row p {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.cards {
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-1) var(--space-3);
+  scroll-snap-type: x proximity;
+  scrollbar-color: var(--color-meta) transparent;
+}
+
+.card-btn {
+  min-width: 128px;
+  min-height: 166px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: var(--shadow-card);
+  scroll-snap-align: start;
+}
+
+.card-btn.playable:not(:disabled):hover {
+  border-color: rgba(0, 117, 222, 0.3);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-3px);
+}
+
+.card-btn:disabled {
+  opacity: 0.48;
+}
+
+.card-type {
+  color: currentColor;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.controls {
+  gap: var(--space-2);
+}
+
+.primary-btn,
+.accent-btn,
+.pick-btn {
+  min-height: 46px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.primary-btn,
+.accent-btn {
+  background: var(--color-primary);
+  color: white;
+}
+
+.primary-btn:hover,
+.accent-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.primary-btn:disabled {
+  background: var(--color-border);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+.waiting-notice {
+  margin: 0;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.result .primary-btn {
+  margin-top: var(--space-3);
+}
+
+.color-picker {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+}
+
+.color-picker p {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.color-btn-row {
+  gap: var(--space-2);
+}
+
+.chat-box,
+.result {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.chat-box {
+  max-height: 240px;
+}
+
+.chat-empty {
+  color: var(--color-meta);
+}
+
+.chat-row {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-ink-soft);
+}
+
+.chat-row:last-child {
+  border-bottom: 0;
+}
+
+.color-pill.color-red,
+.pick-btn.color-red {
+  background: #c9362b;
+  color: white;
+}
+
+.color-pill.color-yellow,
+.pick-btn.color-yellow {
+  background: #e1b832;
+  color: #312500;
+}
+
+.color-pill.color-green,
+.pick-btn.color-green {
+  background: #2a9d70;
+  color: white;
+}
+
+.color-pill.color-blue,
+.pick-btn.color-blue {
+  background: #3974d5;
+  color: white;
+}
+
+.color-pill.color-none {
+  background: #e7e4e1;
+  color: var(--color-muted);
+}
+
+.table-card.color-red,
+.card-btn.color-red {
+  border-top: 4px solid #c9362b;
+  background: #fff8f7;
+}
+
+.table-card.color-yellow,
+.card-btn.color-yellow {
+  border-top: 4px solid #d1a516;
+  background: #fffbed;
+  color: #312500;
+}
+
+.table-card.color-green,
+.card-btn.color-green {
+  border-top: 4px solid #2a9d70;
+  background: #f4fbf7;
+}
+
+.table-card.color-blue,
+.card-btn.color-blue {
+  border-top: 4px solid #3974d5;
+  background: #f5f9ff;
+}
+
+.table-card.color-purple,
+.card-btn.color-purple {
+  border-top: 4px solid #6d4aff;
+  background: #f8f6ff;
+}
+
+@media (max-width: 900px) {
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-card-wide {
+    grid-column: 1 / -1;
+  }
+
+  .play-area {
+    grid-template-columns: 1fr;
+  }
+
+  .discard-panel {
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .table-card {
+    min-height: 160px;
+  }
+}
+
+@media (max-width: 600px) {
+  .onecard-wrap {
+    padding: var(--space-4);
+  }
+
+  .game-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .turn-chip {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-card-wide {
+    grid-column: auto;
+  }
+
+  .discard-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .table-card {
+    min-height: 150px;
+  }
+
+  .players {
+    grid-template-columns: 1fr;
+  }
+
+  .card-btn {
+    min-width: 112px;
+    min-height: 148px;
+  }
+
+  .controls,
+  .color-btn-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-btn,
+  .primary-btn,
+  .accent-btn {
+    transition: none;
   }
 }
 </style>
