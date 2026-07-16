@@ -37,10 +37,14 @@
         >
           게임 변경
         </button>
-        <button type="button" class="start-btn" @click="startGame">
+        <button type="button" class="start-btn" :disabled="!canStartGame" @click="startGame">
           {{ gameLabel(selectedGame) }} 시작
         </button>
       </div>
+      <p v-if="!canStartGame" class="start-requirement" role="status">
+        {{ gameLabel(selectedGame) }}는 최소 {{ selectedGameInfo?.minPlayers || 2 }}명이 필요합니다.
+        현재 {{ playerCount }}명입니다.
+      </p>
     </section>
 
     <section v-else class="guest-notice">
@@ -76,8 +80,8 @@
 </template>
 
 <script setup>
-import { ref, nextTick, watch } from 'vue';
-import { DEFAULT_GAME_ID, GAME_CATALOG, gameLabel } from '../games';
+import { computed, ref, nextTick, watch } from 'vue';
+import { DEFAULT_GAME_ID, GAME_CATALOG, gameLabel, getGame } from '../games';
 import { toSystemErrorMessage } from '../games/errors';
 
 const props = defineProps(['tableConnection']);
@@ -90,6 +94,12 @@ const playerCount = ref(0);
 const messages = ref([]);
 const inputMessage = ref('');
 const chatBox = ref(null);
+const selectedGameInfo = computed(() => getGame(selectedGame.value));
+const canStartGame = computed(
+  () =>
+    isHost.value &&
+    playerCount.value >= (selectedGameInfo.value?.minPlayers || 2)
+);
 
 let boundConnection = null;
 
@@ -138,7 +148,7 @@ function setupListeners(connection) {
 };
 
 const startGame = () => {
-  if (props.tableConnection && isHost.value) {
+  if (props.tableConnection && canStartGame.value) {
     props.tableConnection.send('start_game');
   }
 }
@@ -358,6 +368,20 @@ select:focus {
   background: var(--color-primary-hover);
 }
 
+.start-btn:disabled {
+  border-color: var(--color-border);
+  background: var(--color-surface-muted);
+  color: var(--color-meta);
+  cursor: not-allowed;
+}
+
+.start-requirement {
+  grid-column: 2;
+  margin: calc(var(--space-6) * -1) 0 0;
+  color: var(--color-warning);
+  font-size: 12px;
+}
+
 .guest-notice {
   display: flex;
   align-items: center;
@@ -497,6 +521,11 @@ button[type='submit']:hover {
   .host-controls {
     grid-template-columns: 1fr;
     gap: var(--space-5);
+  }
+
+  .start-requirement {
+    grid-column: 1;
+    margin-top: calc(var(--space-3) * -1);
   }
 }
 

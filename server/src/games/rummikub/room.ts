@@ -112,8 +112,15 @@ export class RummikubRoom extends Room<RummikubState> {
 
     this.onMessage(RUMMIKUB_MESSAGES.startGame, (client) => {
       const player = this.state.players.get(client.sessionId);
-      if (this.state.gamePhase !== 'waiting' || !player?.isHost) return;
-      if (this.getActivePlayerIds().length < RUMMIKUB_GAME.minPlayers) {
+      if (this.state.gamePhase !== 'waiting') {
+        this.rejectRequest(client, 'GAME_ALREADY_STARTED', '이미 게임이 시작되었습니다.');
+        return;
+      }
+      if (!player?.isHost) {
+        this.rejectRequest(client, 'NOT_HOST', '방장만 게임을 시작할 수 있습니다.');
+        return;
+      }
+      if (this.state.players.size < RUMMIKUB_GAME.minPlayers) {
         this.rejectRequest(
           client,
           'NOT_ENOUGH_PLAYERS',
@@ -121,7 +128,19 @@ export class RummikubRoom extends Room<RummikubState> {
         );
         return;
       }
-      this.startGame();
+      try {
+        this.startGame();
+      } catch (error) {
+        logRoomError('rummikub.start_failed', error, {
+          roomId: this.roomId,
+          gameId: RUMMIKUB_GAME.id,
+        });
+        this.rejectRequest(
+          client,
+          'GAME_START_FAILED',
+          '게임을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        );
+      }
     });
 
     this.onMessage(RUMMIKUB_MESSAGES.commitTurn, (client, payload: unknown) => {
@@ -350,7 +369,9 @@ export class RummikubRoom extends Room<RummikubState> {
   }
 
   private startGame() {
-    const playerIds = this.getActivePlayerIds();
+    // waiting 중 연결이 종료된 플레이어는 onLeave에서 제거되므로
+    // 시작 인원은 별도의 connected 플래그가 아닌 실제 참가자 Map을 기준으로 한다.
+    const playerIds = Array.from(this.state.players.keys());
     const shuffled = shuffleRummikubTiles(createRummikubDeck());
     const deal = dealRummikubGame(shuffled, playerIds);
 

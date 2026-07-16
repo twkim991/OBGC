@@ -60,9 +60,18 @@
         <section v-else-if="state?.gamePhase === 'waiting'" class="waiting-panel">
           <div>
             <strong>{{ isHost ? '게임을 시작할 준비가 됐나요?' : '방장이 게임을 시작할 때까지 기다려주세요.' }}</strong>
-            <span>2~4명이 참가할 수 있으며 시작 시 각자 타일 14개를 받습니다.</span>
+            <span>
+              현재 {{ connectedPlayerCount }}명 · 최소 2명 필요 · 시작 시 각자 타일 14개
+            </span>
           </div>
-          <button v-if="isHost" type="button" :disabled="players.length < 2" @click="startGame">게임 시작</button>
+          <button
+            v-if="isHost"
+            type="button"
+            :disabled="connectedPlayerCount < 2"
+            @click="startGame"
+          >
+            게임 시작
+          </button>
         </section>
       </main>
 
@@ -163,6 +172,9 @@ watch(
 );
 
 const players = computed(() => Object.values(state.value?.players || {}));
+const connectedPlayerCount = computed(
+  () => players.value.filter((player) => player.connected).length
+);
 const myPlayer = computed(() =>
   players.value.find((player) => player.sessionId === mySessionId.value)
 );
@@ -355,7 +367,7 @@ function undoDraft() {
 }
 
 function startGame() {
-  if (room.value && isHost.value && players.value.length >= 2) {
+  if (room.value && isHost.value && connectedPlayerCount.value >= 2) {
     room.value.send(RUMMIKUB_PROTOCOL.messages.startGame);
   }
 }

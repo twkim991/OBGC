@@ -229,6 +229,11 @@ export class TableRoom extends Room<TableState> {
           roomId: this.roomId,
           gameId: selectedGame.id,
         });
+        sendRoomError(
+          client,
+          'GAME_START_FAILED',
+          `${selectedGame.label} 게임방을 만들지 못했습니다. 잠시 후 다시 시도해주세요.`,
+        );
         this.isStarting = false;
       }
     });
