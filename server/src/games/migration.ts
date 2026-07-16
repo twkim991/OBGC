@@ -120,7 +120,8 @@ export async function createRoomMigration(
 
   const migrationSeats: MigrationSeat[] = participants.map((participant) => ({
     ...participant,
-    token: randomBytes(24).toString('base64url'),
+    // Cafe24의 구형 Node.js에서도 동작하며 URL에 안전한 192비트 토큰입니다.
+    token: randomBytes(24).toString('hex'),
   }));
 
   const room = await matchMaker.createRoom(roomName, {
