@@ -27,6 +27,7 @@
         :colyseusClient="colyseusClient"
         :playerIdentity="playerIdentity"
         @join-table="handleJoinTable"
+        @update-nickname="handleNicknameUpdate"
       />
 
       <TableRoomView
@@ -98,11 +99,17 @@ const storedNickname =
 localStorage.setItem('obgc.playerId', storedPlayerId);
 localStorage.setItem('obgc.nickname', storedNickname);
 
-const playerIdentity = Object.freeze({
+const playerNickname = ref(storedNickname);
+const playerIdentity = computed(() => ({
   playerId: storedPlayerId,
-  nickname: storedNickname,
+  nickname: playerNickname.value,
   protocolVersions: CLIENT_PROTOCOL_VERSIONS,
-});
+}));
+
+const handleNicknameUpdate = (nickname) => {
+  playerNickname.value = nickname;
+  localStorage.setItem('obgc.nickname', nickname);
+};
 
 const currentView = ref('lobby'); // 'lobby', 'table', 'game'
 const currentGameType = ref('');

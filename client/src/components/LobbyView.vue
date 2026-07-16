@@ -5,6 +5,17 @@
         <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> LIVE LOBBY</p>
         <h1>함께할 테이블을 찾아보세요.</h1>
         <p class="lobby-description">열린 방에 바로 입장하거나 새 테이블을 만들어 게임을 시작하세요.</p>
+        <div class="nickname-setting">
+          <label for="lobby-nickname">내 닉네임</label>
+          <input
+            id="lobby-nickname"
+            v-model="nickname"
+            maxlength="40"
+            autocomplete="nickname"
+            placeholder="닉네임을 입력하세요"
+          />
+          <span>방 생성과 입장에 사용 · 중복 가능</span>
+        </div>
       </div>
       <div class="room-count" aria-live="polite">
         <strong>{{ filteredRooms.length }}</strong>
@@ -124,9 +135,10 @@ import {
 } from '../games';
 
 const props = defineProps(['colyseusClient', 'playerIdentity']);
-const emit = defineEmits(['join-table']);
+const emit = defineEmits(['join-table', 'update-nickname']);
 
 const availableRooms = ref([]);
+const nickname = ref(props.playerIdentity?.nickname || '');
 const newRoomName = ref('');
 const newRoomGame = ref(DEFAULT_GAME_ID);
 const selectedFilter = ref('all');
@@ -196,6 +208,13 @@ watch(selectedFilter, () => {
   visibleRoomLimit.value = 100;
 });
 
+watch(
+  () => props.playerIdentity?.nickname,
+  (value) => {
+    if (value && value !== nickname.value) nickname.value = value;
+  }
+);
+
 const emptyRoomTitle = computed(() =>
   availableRooms.value.length === 0
     ? '아직 열린 테이블이 없습니다.'
@@ -244,6 +263,21 @@ onUnmounted(() => {
   if (lobbyConnection) lobbyConnection.leave();
 });
 
+const getPlayerIdentity = () => {
+  const normalizedNickname = nickname.value.trim();
+  if (!normalizedNickname) {
+    lobbyError.value = '방을 만들거나 입장하려면 닉네임을 입력해주세요.';
+    return null;
+  }
+
+  nickname.value = normalizedNickname;
+  emit('update-nickname', normalizedNickname);
+  return {
+    ...props.playerIdentity,
+    nickname: normalizedNickname,
+  };
+};
+
 const createRoom = async () => {
   if (!newRoomName.value.trim()) {
     return alert('방 제목을 입력하세요!');
@@ -252,12 +286,14 @@ const createRoom = async () => {
     return alert('플레이할 게임을 선택하세요!');
   }
   if (!props.colyseusClient) return;
+  const playerIdentity = getPlayerIdentity();
+  if (!playerIdentity) return;
   try {
     lobbyError.value = '';
     const connection = await props.colyseusClient.create('table_room', {
       roomName: newRoomName.value.trim(),
       gameType: newRoomGame.value,
-      ...props.playerIdentity,
+      ...playerIdentity,
     });
     emit('join-table', connection); // 부모에게 접속 정보 전달
   } catch (e) {
@@ -268,9 +304,11 @@ const createRoom = async () => {
 
 const joinRoom = async (roomId) => {
   if (!props.colyseusClient) return;
+  const playerIdentity = getPlayerIdentity();
+  if (!playerIdentity) return;
   try {
     lobbyError.value = '';
-    const connection = await props.colyseusClient.joinById(roomId, props.playerIdentity);
+    const connection = await props.colyseusClient.joinById(roomId, playerIdentity);
     emit('join-table', connection);
   } catch (e) {
     console.error('방 입장 에러:', e);
@@ -375,6 +413,32 @@ const joinRoom = async (roomId) => {
   color: var(--color-muted);
   font-size: clamp(16px, 2vw, 19px);
   line-height: 1.55;
+}
+
+.nickname-setting {
+  width: min(100%, 480px);
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.nickname-setting label {
+  color: var(--color-ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nickname-setting input {
+  min-height: 40px;
+  font-size: 14px;
+}
+
+.nickname-setting span {
+  color: var(--color-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .room-count {
@@ -712,6 +776,15 @@ button:disabled {
 
   .lobby-heading h1 {
     font-size: 34px;
+  }
+
+  .nickname-setting {
+    grid-template-columns: 1fr;
+  }
+
+  .nickname-setting span {
+    margin-top: calc(var(--space-1) * -1);
+    white-space: normal;
   }
 
   .create-panel {
