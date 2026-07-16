@@ -12,6 +12,16 @@
       </div>
     </header>
 
+    <p v-if="lobbyError" class="lobby-error" role="alert">{{ lobbyError }}</p>
+    <aside v-if="GAME_CATALOG_ISSUES.length" class="catalog-warning" role="status">
+      <strong>일부 게임을 사용할 수 없습니다.</strong>
+      <ul>
+        <li v-for="issue in GAME_CATALOG_ISSUES" :key="`${issue.gameId}-${issue.code}`">
+          {{ issue.message }}
+        </li>
+      </ul>
+    </aside>
+
     <section class="create-panel" aria-labelledby="create-room-title">
       <div class="section-copy">
         <p class="section-label">새 테이블</p>
@@ -30,12 +40,20 @@
           <span class="field-label">방 제목</span>
           <input
             v-model="newRoomName"
+            maxlength="60"
             aria-label="새 방 제목"
             :placeholder="`${gameLabel(newRoomGame)} 같이 하실 분`"
             @keyup.enter="createRoom"
           />
         </label>
-        <button class="create-button" type="button" @click="createRoom">방 만들기</button>
+        <button
+          class="create-button"
+          type="button"
+          :disabled="!isSupportedGame(newRoomGame)"
+          @click="createRoom"
+        >
+          방 만들기
+        </button>
       </div>
     </section>
 
@@ -59,7 +77,7 @@
           <strong>{{ emptyRoomTitle }}</strong>
           <span>{{ emptyRoomDescription }}</span>
         </li>
-        <li v-for="room in filteredRooms" :key="room.roomId" class="room-item">
+        <li v-for="room in displayedRooms" :key="room.roomId" class="room-item">
           <div class="room-main">
             <span class="room-icon" :style="gameTone(room.metadata?.gameType)" aria-hidden="true">
               {{ gameShortLabel(room.metadata?.gameType) }}
@@ -85,16 +103,20 @@
           </button>
         </li>
       </ul>
+      <button v-if="hasMoreRooms" type="button" class="load-more" @click="visibleRoomLimit += 100">
+        방 {{ Math.min(100, filteredRooms.length - displayedRooms.length) }}개 더 보기
+      </button>
     </section>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onUnmounted, watch } from 'vue';
+import { computed, nextTick, ref, onUnmounted, watch } from 'vue';
 import GameFilterPicker from './GameFilterPicker.vue';
 import {
   DEFAULT_GAME_ID,
   GAME_CATALOG,
+  GAME_CATALOG_ISSUES,
   gameLabel,
   gameShortLabel,
   gameTone,
@@ -108,7 +130,35 @@ const availableRooms = ref([]);
 const newRoomName = ref('');
 const newRoomGame = ref(DEFAULT_GAME_ID);
 const selectedFilter = ref('all');
+const lobbyError = ref('');
+const visibleRoomLimit = ref(100);
 let lobbyConnection = null;
+let lobbyMetricPending = false;
+let pendingMetricSource = 'initial';
+
+const scheduleLobbyMetric = (source) => {
+  pendingMetricSource = source;
+  if (lobbyMetricPending) return;
+
+  const startedAt = performance.now();
+  lobbyMetricPending = true;
+  nextTick(() => {
+    window.requestAnimationFrame(() => {
+      lobbyMetricPending = false;
+      console.info(
+        JSON.stringify({
+          level: 'info',
+          event: 'lobby.rooms_rendered',
+          source: pendingMetricSource,
+          receivedRoomCount: availableRooms.value.length,
+          filteredRoomCount: filteredRooms.value.length,
+          renderedRoomCount: displayedRooms.value.length,
+          durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+        })
+      );
+    });
+  });
+};
 
 const roomCountByGame = computed(() => {
   const counts = Object.fromEntries(GAME_CATALOG.map((game) => [game.id, 0]));
@@ -124,6 +174,26 @@ const roomCountByGame = computed(() => {
 const filteredRooms = computed(() => {
   if (selectedFilter.value === 'all') return availableRooms.value;
   return availableRooms.value.filter((room) => room.metadata?.gameType === selectedFilter.value);
+});
+
+const displayedRooms = computed(() => filteredRooms.value.slice(0, visibleRoomLimit.value));
+const hasMoreRooms = computed(() => displayedRooms.value.length < filteredRooms.value.length);
+
+watch(
+  () => GAME_CATALOG.map((game) => game.id).join(','),
+  () => {
+    if (!isSupportedGame(newRoomGame.value)) {
+      newRoomGame.value = GAME_CATALOG[0]?.id || '';
+    }
+    if (selectedFilter.value !== 'all' && !isSupportedGame(selectedFilter.value)) {
+      selectedFilter.value = 'all';
+    }
+  },
+  { immediate: true }
+);
+
+watch(selectedFilter, () => {
+  visibleRoomLimit.value = 100;
 });
 
 const emptyRoomTitle = computed(() =>
@@ -145,18 +215,25 @@ watch(
     if (client) {
       try {
         lobbyConnection = await client.joinOrCreate('lobby');
+        lobbyError.value = '';
 
-        lobbyConnection.onMessage('rooms', (rooms) => (availableRooms.value = rooms));
+        lobbyConnection.onMessage('rooms', (rooms) => {
+          availableRooms.value = rooms;
+          scheduleLobbyMetric('snapshot');
+        });
         lobbyConnection.onMessage('+', ([roomId, room]) => {
           const exists = availableRooms.value.findIndex((r) => r.roomId === roomId);
           if (exists !== -1) availableRooms.value[exists] = room;
           else availableRooms.value.push(room);
+          scheduleLobbyMetric(exists === -1 ? 'room_added' : 'room_updated');
         });
         lobbyConnection.onMessage('-', (roomId) => {
           availableRooms.value = availableRooms.value.filter((r) => r.roomId !== roomId);
+          scheduleLobbyMetric('room_removed');
         });
       } catch (e) {
         console.error('로비 접속 에러:', e);
+        lobbyError.value = '실시간 방 목록에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.';
       }
     }
   },
@@ -176,6 +253,7 @@ const createRoom = async () => {
   }
   if (!props.colyseusClient) return;
   try {
+    lobbyError.value = '';
     const connection = await props.colyseusClient.create('table_room', {
       roomName: newRoomName.value.trim(),
       gameType: newRoomGame.value,
@@ -184,16 +262,19 @@ const createRoom = async () => {
     emit('join-table', connection); // 부모에게 접속 정보 전달
   } catch (e) {
     console.error('방 생성 에러:', e);
+    lobbyError.value = '방을 만들지 못했습니다. 입력 내용과 서버 연결을 확인해주세요.';
   }
 };
 
 const joinRoom = async (roomId) => {
   if (!props.colyseusClient) return;
   try {
+    lobbyError.value = '';
     const connection = await props.colyseusClient.joinById(roomId, props.playerIdentity);
     emit('join-table', connection);
   } catch (e) {
     console.error('방 입장 에러:', e);
+    lobbyError.value = '방에 입장하지 못했습니다. 방이 시작되었거나 인원이 가득 찼을 수 있습니다.';
   }
 };
 </script>
@@ -202,6 +283,52 @@ const joinRoom = async (roomId) => {
 .lobby-screen {
   display: grid;
   gap: var(--space-8);
+}
+
+.lobby-error {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  border-radius: var(--radius-small);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, white);
+}
+
+.catalog-warning {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--color-warning) 7%, white);
+  color: var(--color-ink-soft);
+}
+
+.catalog-warning strong {
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.catalog-warning ul {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.load-more {
+  display: block;
+  min-height: 42px;
+  margin: var(--space-4) auto 0;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-ink-soft);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.room-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 88px;
 }
 
 .lobby-heading {

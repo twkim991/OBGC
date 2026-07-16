@@ -17,6 +17,11 @@
     </header>
 
     <main class="app-container">
+      <div v-if="migrationError" class="app-alert" role="alert">
+        <span>{{ migrationError }}</span>
+        <button type="button" @click="migrationError = ''">닫기</button>
+      </div>
+
       <LobbyView
         v-if="currentView === 'lobby'"
         :colyseusClient="colyseusClient"
@@ -26,32 +31,56 @@
 
       <TableRoomView
         v-else-if="currentView === 'table'"
+        :key="roomConnection?.sessionId"
         :tableConnection="roomConnection"
         @leave-table="handleLeaveRoom"
         @move-to-game="handleMoveToGame"
       />
 
       <component
-        v-else-if="currentView === 'game'"
+        v-else-if="currentView === 'game' && currentGameComponent"
+        :key="roomConnection?.sessionId"
         :is="currentGameComponent"
         :gameConnection="roomConnection"
         @leave-game="handleLeaveRoom"
         @move-to-game="handleMoveToGame"
       />
+
+      <section v-else-if="currentView === 'game'" class="unsupported-game" role="alert">
+        <p class="eyebrow">UNSUPPORTED GAME</p>
+        <h1>이 게임 화면을 불러올 수 없습니다.</h1>
+        <p>클라이언트를 새로고침하거나 로비로 돌아가 다시 시도해주세요.</p>
+        <button type="button" @click="handleLeaveRoom">로비로 돌아가기</button>
+      </section>
     </main>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, onMounted, computed, defineAsyncComponent } from 'vue';
 import * as Colyseus from 'colyseus.js';
 
 import LobbyView from './components/LobbyView.vue';
 import TableRoomView from './components/TableRoomView.vue';
-import { GAME_CATALOG } from './games';
+import GameLoadError from './components/games/shared/GameLoadError.vue';
+import GameLoading from './components/games/shared/GameLoading.vue';
+import {
+  CLIENT_PROTOCOL_VERSIONS,
+  GAME_CATALOG,
+  loadGameCatalog,
+} from './games';
 
 const games = Object.fromEntries(
-  GAME_CATALOG.map((game) => [game.id, defineAsyncComponent(game.loadView)])
+  GAME_CATALOG.map((game) => [
+    game.id,
+    defineAsyncComponent({
+      loader: game.loadView,
+      loadingComponent: GameLoading,
+      errorComponent: GameLoadError,
+      delay: 120,
+      timeout: 10000,
+    }),
+  ])
 );
 
 const createPlayerId = () => {
@@ -72,28 +101,117 @@ localStorage.setItem('obgc.nickname', storedNickname);
 const playerIdentity = Object.freeze({
   playerId: storedPlayerId,
   nickname: storedNickname,
+  protocolVersions: CLIENT_PROTOCOL_VERSIONS,
 });
 
 const currentView = ref('lobby'); // 'lobby', 'table', 'game'
 const currentGameType = ref('');
-const colyseusClient = ref(null);
-const roomConnection = ref(null);
+const colyseusClient = shallowRef(null);
+const roomConnection = shallowRef(null);
+const migrationError = ref('');
+let migrationInProgress = false;
+let migrationCancelled = false;
+let pendingMigrationRoom = null;
 
 const currentGameComponent = computed(() => games[currentGameType.value] || null);
+const MIGRATION_TIMEOUT_MS = 27000;
 
-onMounted(() => {
-  const endpoint = import.meta.env.DEV ? 'ws://localhost:8002' : `ws://${window.location.host}`;
+const waitForMigrationReady = (candidateRoom) =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    let removeAbortListener = null;
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      candidateRoom.onStateChange.remove(handleStateChange);
+      candidateRoom.onLeave.remove(handleCandidateLeave);
+      if (typeof removeAbortListener === 'function') removeAbortListener();
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(candidateRoom);
+    };
+    const handleStateChange = (state) => {
+      if (state?.migrationReady) finish();
+    };
+    const handleCandidateLeave = () => {
+      finish(new Error('새 방이 이동 준비 중 종료되었습니다.'));
+    };
+    const timeoutId = setTimeout(() => {
+      finish(new Error('방 이동 준비 시간이 초과되었습니다.'));
+    }, MIGRATION_TIMEOUT_MS);
+
+    candidateRoom.onStateChange(handleStateChange);
+    candidateRoom.onLeave(handleCandidateLeave);
+    removeAbortListener = candidateRoom.onMessage('migration_aborted', (data) => {
+      finish(new Error(data?.message || '방 이동이 취소되었습니다.'));
+    });
+
+    handleStateChange(candidateRoom.state);
+  });
+
+onMounted(async () => {
+  const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const endpoint = import.meta.env.DEV ? 'ws://localhost:8002' : `${socketProtocol}//${window.location.host}`;
+
+  try {
+    await loadGameCatalog();
+  } catch (error) {
+    console.error('게임 카탈로그 로드 실패:', error);
+    migrationError.value = GAME_CATALOG.length
+      ? '게임 목록을 갱신하지 못해 기본 목록을 사용합니다.'
+      : '현재 서버와 호환되는 게임이 없습니다. 클라이언트를 업데이트해주세요.';
+  }
+
   colyseusClient.value = new Colyseus.Client(endpoint);
 });
 
 // 로비에서 방에 접속했을 때 (대기실 진입)
 const handleJoinTable = (connection) => {
   roomConnection.value = connection;
+  bindRoomLifecycle(connection);
   currentView.value = 'table';
+};
+
+const bindRoomLifecycle = (room) => {
+  const roomId = room.id;
+  const sessionId = room.sessionId;
+
+  room.onLeave(async (code) => {
+    if (code === 4000 || roomConnection.value !== room) return;
+
+    migrationError.value = '서버 연결을 복구하고 있습니다.';
+    try {
+      const reconnectedRoom = await colyseusClient.value.reconnect(roomId, sessionId);
+      if (roomConnection.value !== room) {
+        reconnectedRoom.leave();
+        return;
+      }
+
+      roomConnection.value = reconnectedRoom;
+      bindRoomLifecycle(reconnectedRoom);
+      migrationError.value = '';
+    } catch (error) {
+      console.error('방 재연결 실패:', error);
+      if (roomConnection.value === room) {
+        roomConnection.value = null;
+        currentView.value = 'lobby';
+        migrationError.value = '방 연결이 종료되어 로비로 이동했습니다.';
+      }
+    }
+  });
 };
 
 // 방(대기실 또는 게임방)에서 나갈 때
 const handleLeaveRoom = () => {
+  migrationCancelled = true;
+  if (pendingMigrationRoom) {
+    pendingMigrationRoom.leave();
+    pendingMigrationRoom = null;
+  }
   if (roomConnection.value) {
     roomConnection.value.leave();
     roomConnection.value = null;
@@ -103,13 +221,24 @@ const handleLeaveRoom = () => {
 
 // 🔥 강제 이주 신호를 받았을 때 (대기실 가기 & 게임하러 가기 둘 다 처리!)
 const handleMoveToGame = async (data) => {
-  if (roomConnection.value) {
-    roomConnection.value.leave(); // 기존 방 연결 종료
-  }
+  if (migrationInProgress) return;
+  migrationInProgress = true;
+  migrationCancelled = false;
+  const previousRoom = roomConnection.value;
+  let nextRoom = null;
+  migrationError.value = '';
 
   try {
-    // 서버가 파준 새 방(새 대기실 or 새 게임방)으로 접속!
-    roomConnection.value = await colyseusClient.value.joinById(data.roomId, playerIdentity);
+    if (!data?.reservation) throw new Error('좌석 예약 정보가 없습니다.');
+
+    // 새 방 참가가 확인된 뒤에만 기존 방 연결을 종료한다.
+    nextRoom = await colyseusClient.value.consumeSeatReservation(data.reservation);
+    pendingMigrationRoom = nextRoom;
+    await waitForMigrationReady(nextRoom);
+    if (migrationCancelled) throw new Error('방 이동이 취소되었습니다.');
+    const roomToLeave = roomConnection.value;
+    roomConnection.value = nextRoom;
+    bindRoomLifecycle(nextRoom);
 
     // 서버에서 보내준 gameType에 따라 화면 분기 처리
     if (data.gameType === 'table') {
@@ -118,9 +247,26 @@ const handleMoveToGame = async (data) => {
       currentGameType.value = data.gameType;
       currentView.value = 'game'; // 기존처럼 게임 화면으로 진입
     }
+
+    if (roomToLeave && roomToLeave !== nextRoom) {
+      roomToLeave.leave();
+    }
   } catch (error) {
     console.error('방 이주 실패:', error);
-    handleLeaveRoom(); // 실패하면 쓸쓸히 로비로 쫓겨남
+    if (nextRoom) nextRoom.leave();
+    if (migrationCancelled) {
+      roomConnection.value = null;
+      currentView.value = 'lobby';
+      return;
+    }
+    if (!roomConnection.value || roomConnection.value === nextRoom) {
+      roomConnection.value = previousRoom;
+    }
+    migrationError.value =
+      error?.message || '새 방에 참가하지 못했습니다. 현재 방에서 다시 시도해주세요.';
+  } finally {
+    pendingMigrationRoom = null;
+    migrationInProgress = false;
   }
 };
 </script>
@@ -322,6 +468,42 @@ p {
   width: min(calc(100% - 48px), 1180px);
   margin: 0 auto;
   padding: var(--space-10) 0 var(--space-12);
+}
+
+.app-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  border-radius: var(--radius-small);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, white);
+}
+
+.app-alert button,
+.unsupported-game button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  color: white;
+  background: var(--color-primary);
+  cursor: pointer;
+}
+
+.unsupported-game {
+  padding: var(--space-10);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+}
+
+.unsupported-game p:not(.eyebrow) {
+  margin: var(--space-3) 0 var(--space-6);
+  color: var(--color-muted);
 }
 
 @media (max-width: 700px) {

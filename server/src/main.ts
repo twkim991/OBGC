@@ -2,8 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Server, LobbyRoom } from 'colyseus';
 import { TableRoom } from './rooms/TableRoom';
-import { YutnoriRoom } from './rooms/YutnoriRoom'; // <-- 추가
-import { MapleOneCardRoom } from './rooms/MapleOneCardRoom'; // <-- 추가
+import { registerGameRooms } from './games/registry';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,9 +15,8 @@ async function bootstrap() {
   gameServer.define('lobby', LobbyRoom);
   gameServer.define('table_room', TableRoom).enableRealtimeListing();
 
-  // 실제 게임 방 등록 (로비 목록에는 띄우지 않음!)
-  gameServer.define('yutnori', YutnoriRoom);
-  gameServer.define('onecard', MapleOneCardRoom);
+  // 실제 게임 방은 중앙 레지스트리에서 일괄 등록합니다.
+  registerGameRooms(gameServer);
 
   // 🔥 Cafe24가 던져주는 PORT 환경변수를 최우선으로 쓰도록 설정!
   const port = process.env.PORT || 8002;

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { GameCatalogController } from './games/catalog.controller';
 
 @Module({
   imports: [
@@ -11,5 +12,6 @@ import { join } from 'path';
       exclude: ['/api/(.*)'], // API 경로는 프론트 화면 대신 백엔드가 처리하도록 예외 처리
     }),
   ],
+  controllers: [GameCatalogController],
 })
 export class AppModule {}

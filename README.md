@@ -176,73 +176,61 @@ npm run build
 ```
 
 ## 7) 새 보드게임 추가(확장) 가이드
-아래 순서대로 구현하면 기존 구조와 가장 자연스럽게 연결됩니다.
+새 게임은 게임별 모듈을 만든 뒤 서버와 클라이언트 레지스트리에 한 번씩 연결합니다.
+`main.ts`, 로비, 대기실, `App.vue`를 게임마다 직접 수정하지 않습니다.
 
-### Step 1. 서버 게임 룸 클래스 추가
-`server/src/rooms`에 `NewGameRoom.ts`를 추가합니다.
+### Step 1. 서버 게임 모듈 작성
 
-핵심 구현 포인트:
-- `Room<NewGameState>` 상속
-- `onCreate`, `onJoin`, `onLeave` 구현
-- `this.setState(...)`로 스키마 상태 초기화
-- 필요한 메시지 이벤트(`this.onMessage('...')`) 정의
-- 게임 종료 시 `move_room` 이벤트로 테이블 복귀 시나리오 지원
+`server/src/games/<game-id>`에 아래 역할을 분리합니다.
 
-### Step 2. 서버 메인 등록
-`server/src/main.ts`에서 게임 룸을 등록합니다.
-
-예시:
-```ts
-gameServer.define('newgame', NewGameRoom);
+```text
+definition.ts       # 룸 클래스와 메타데이터 결합
+metadata.ts         # ID, 표시명, 인원, 프로토콜 버전
+protocol.ts         # payload 런타임 검증
+schema.ts           # 모든 사용자에게 공개할 Schema만 정의
+domain/             # 네트워크와 무관한 순수 규칙 및 상태 전이
 ```
 
-> `define`에 넣는 문자열(`newgame`)이 클라이언트에서 사용하는 게임 타입 키가 됩니다.
+비공개 패, 덱, 타일은 Schema에 넣지 않고 서버 내부에 보관한 뒤 해당 플레이어에게만 전용
+메시지로 전달합니다. 룸 클래스는 접속, 권한, 검증, 도메인 호출을 담당합니다.
 
-### Step 3. 대기실 게임 선택 목록 추가
-`client/src/components/TableRoomView.vue`의 게임 선택 `<select>`에 옵션을 추가합니다.
+게임 룸은 서버가 발급한 일회용 좌석 예약만 허용합니다. 예약된 참가자 전원이 실제로 연결된
+뒤에만 `migrationReady`를 확정하며, 제한 시간 안에 모이지 못하면 새 룸을 종료해 기존
+테이블에서 다시 시도할 수 있게 합니다.
 
-예시:
-```html
-<option value="newgame">새 게임 이름</option>
-```
+### Step 2. 서버 레지스트리 연결
 
-방장이 `start_game` 메시지로 보낸 값이 그대로 서버 `matchMaker.createRoom(selectedGame)`에 전달되므로,
-옵션 value는 `main.ts`의 `define('newgame', ...)` 키와 반드시 일치해야 합니다.
+완성한 `GameDefinition`을 `server/src/games/registry.ts`의 `GAME_DEFINITIONS`에 추가합니다.
+룸 등록, 인원 제한, 대기실 게임 변경, 공개 카탈로그는 이 정의를 사용합니다.
 
-### Step 4. 게임 UI 컴포넌트 추가
-`client/src/components/games/NewGameView.vue`를 추가합니다.
+### Step 3. 클라이언트 게임 모듈 작성
 
-구현 포인트:
-- `props.gameConnection` 수신
-- `onStateChange`로 서버 상태 반영
-- `onMessage('chat')`, `onMessage('move_room')` 등 이벤트 처리
-- 게임 액션 시 `gameConnection.send('event_name', payload)` 호출
+`client/src/games/<game-id>`에 프로토콜 버전과 상태 투영 로직을 두고, 게임 화면은 작은 보드,
+개인 패, 플레이어 패널, 컨트롤 컴포넌트로 분리합니다. 서버 Schema 전체를 JSON으로 복제하지
+말고 화면에 필요한 공개 상태만 투영합니다.
 
-### Step 5. App 동적 라우팅 맵 등록
-`client/src/App.vue`의 `games` 맵에 동적 컴포넌트를 등록합니다.
+### Step 4. 클라이언트 로더 연결
 
-예시:
-```js
-const games = {
-  yutnori: defineAsyncComponent(() => import('./components/games/YutnoriView.vue')),
-  onecard: defineAsyncComponent(() => import('./components/games/MapleOneCardView.vue')),
-  newgame: defineAsyncComponent(() => import('./components/games/NewGameView.vue')),
-};
-```
+`client/src/games.js`의 `LOCAL_GAME_VIEWS`에 화면 로더와 시각 속성을 추가합니다. 서버
+`/api/games` 카탈로그의 ID와 프로토콜 버전이 일치하는 게임만 로비와 대기실에 표시됩니다.
 
-### Step 6. (권장) 테스트 추가
-서버 룸 로직은 룰이 복잡해지기 쉬우므로 최소 아래를 권장합니다.
+### Step 5. 검증 항목 추가
 
-- 턴 전환/승패 판정 단위 테스트
-- 불법 액션 차단 테스트(내 턴 아님, 잘못된 카드/말 선택 등)
-- 게임 종료 후 리턴 룸 이동 메시지 테스트
+- 순수 도메인 규칙 및 상태 전이
+- 잘못된 payload와 권한 없는 행동 거부
+- 다른 플레이어의 비공개 상태가 전달되지 않음
+- 좌석 예약의 만료, 변조, 재사용 거부
+- 서버 카탈로그와 클라이언트 로더의 ID 및 프로토콜 버전 일치
+- 게임 종료 후 예약 기반 테이블 복귀
 
 ## 8) 구현 시 체크리스트
-- [ ] 서버 룸 키(`define`)와 클라이언트 선택 값(`option value`) 일치
-- [ ] 게임방 입장 후 `onStateChange`가 정상적으로 화면 갱신
-- [ ] 게임 종료 시 `move_room` 이벤트로 테이블 복귀 가능
-- [ ] 서버 테스트(`test`, `test:e2e`) 통과
+- [ ] 공개 Schema에 다른 사용자의 패나 서버 덱이 없음
+- [ ] 모든 메시지 payload에 런타임 검증과 크기 제한이 있음
+- [ ] 서버 정의와 클라이언트 로더의 게임 ID 및 프로토콜 버전 일치
+- [ ] 서버가 발급한 좌석 예약으로만 게임방 이동 가능
+- [ ] 이동 실패 시 기존 방 연결 유지
+- [ ] 재접속 후 본인의 개인 상태만 다시 수신
+- [ ] 게임 종료 후 예약 기반으로 테이블 복귀 가능
+- [ ] 서버 테스트와 빌드, 클라이언트 빌드 통과
 
----
-필요 시 다음 단계로, 게임별 공통 인터페이스(예: `BaseGameRoom`, 공통 이벤트 타입)를 도입해
-새 게임 추가 비용을 더 낮출 수 있습니다.
+상세한 단계와 완료 기준은 `doc/scalability_refactoring_plan.md`를 참고합니다.

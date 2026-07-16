@@ -50,64 +50,10 @@
             </div>
           </article>
 
-          <article class="players-panel">
-            <div class="panel-heading">
-              <h2>플레이어</h2>
-              <span>{{ players.length }}명</span>
-            </div>
-            <div class="player-list">
-              <div
-                v-for="player in players"
-                :key="player.sessionId"
-                class="player-row"
-                :class="{
-                  current: player.sessionId === state?.currentTurnId,
-                  me: player.sessionId === mySessionId,
-                  bankrupt: player.bankrupt,
-                }"
-              >
-                <span class="avatar" aria-hidden="true">{{ playerInitial(player.nickname) }}</span>
-                <div class="player-copy">
-                  <strong>
-                    {{ player.nickname }}
-                    <span v-if="player.sessionId === mySessionId" class="me-label">나</span>
-                  </strong>
-                  <small v-if="player.bankrupt">파산</small>
-                  <small v-else-if="player.rank">{{ player.rank }}위로 완료</small>
-                  <small v-else-if="player.sessionId === state?.currentTurnId">진행 중</small>
-                  <small v-else>대기 중</small>
-                </div>
-                <span class="card-count">{{ player.hand?.length ?? 0 }}장</span>
-              </div>
-            </div>
-          </article>
+          <OneCardPlayerPanel :players="players" :current-turn-id="state?.currentTurnId || ''" :my-session-id="mySessionId" />
         </section>
 
-        <section class="hand-panel">
-          <div class="panel-heading">
-            <h2>내 손패</h2>
-            <span>
-              {{ myHand.length }}장
-              <template v-if="isMyTurn"> · 낼 수 있는 카드 {{ playableCardCount }}장</template>
-            </span>
-          </div>
-          <div v-if="myHand.length" class="hand-scroll">
-            <button
-              v-for="card in myHand"
-              :key="card.id"
-              class="game-card hand-card"
-              :class="[`color-${card.color}`, { playable: isMyTurn && canPlay(card) }]"
-              :disabled="!isMyTurn || !canPlay(card)"
-              type="button"
-              @click="onClickCard(card)"
-            >
-              <small>{{ cardTypeLabel(card) }}</small>
-              <b>{{ cardFace(card) }}</b>
-              <span>{{ formatCard(card) }}</span>
-            </button>
-          </div>
-          <p v-else class="empty-state">아직 받은 카드가 없습니다.</p>
-        </section>
+        <OneCardHandPanel :cards="myHand" :is-my-turn="isMyTurn" @select="onClickCard" />
 
         <section class="game-actions" aria-label="게임 동작">
           <button
@@ -136,55 +82,16 @@
         </section>
       </main>
 
-      <aside class="activity-panel" aria-labelledby="activity-title">
-        <div class="panel-heading">
-          <h2 id="activity-title">테이블 기록</h2>
-          <span>실시간</span>
-        </div>
-        <div class="activity-log" role="log" aria-live="polite">
-          <p v-if="!messages.length" class="empty-activity">아직 기록이 없습니다.</p>
-          <p v-for="(msg, index) in messages" :key="index" class="activity-line">
-            <strong>{{ msg.clientId }}</strong>
-            <span>{{ msg.message }}</span>
-          </p>
-        </div>
-        <p class="rule-note">
-          공격이 누적되면 동급 이상의 공격 카드로 대응할 수 있습니다. 색상 선택 카드는 다음 진행 색상을 바꿉니다.
-        </p>
-      </aside>
+      <GameActivityPanel
+        :messages="messages"
+        note="공격이 누적되면 동급 이상의 공격 카드로 대응할 수 있습니다. 색상 선택 카드는 다음 진행 색상을 바꿉니다."
+      />
     </div>
 
     <p v-if="bgmError" class="bgm-error" role="alert">{{ bgmError }}</p>
 
-    <div v-if="showColorPicker" class="modal-backdrop" @click.self="cancelColorPicker">
-      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="color-picker-title">
-        <p class="eyebrow">색상 선택 카드</p>
-        <h2 id="color-picker-title">다음 색상을 선택하세요.</h2>
-        <p class="modal-copy">선택한 색상으로 다음 플레이가 이어집니다.</p>
-        <div class="color-options">
-          <button class="color-option color-red" type="button" @click="submitSelectedCard('red')">빨강</button>
-          <button class="color-option color-yellow" type="button" @click="submitSelectedCard('yellow')">노랑</button>
-          <button class="color-option color-green" type="button" @click="submitSelectedCard('green')">초록</button>
-          <button class="color-option color-blue" type="button" @click="submitSelectedCard('blue')">파랑</button>
-        </div>
-        <button class="button button-secondary modal-cancel" type="button" @click="cancelColorPicker">
-          선택 취소
-        </button>
-      </section>
-    </div>
-
-    <div v-if="state?.gamePhase === 'finished'" class="modal-backdrop">
-      <section class="modal result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title">
-        <p class="eyebrow">게임 종료</p>
-        <h2 id="result-title">최종 순위</h2>
-        <ol class="ranking-list">
-          <li v-for="sid in state.rankings" :key="sid">{{ getPlayerName(sid) }}</li>
-        </ol>
-        <button class="button button-primary" type="button" @click="returnToTable">
-          멤버 그대로 테이블로 복귀
-        </button>
-      </section>
-    </div>
+    <OneCardColorPicker v-if="showColorPicker" @select="submitSelectedCard" @cancel="cancelColorPicker" />
+    <OneCardResultModal v-if="state?.gamePhase === 'finished'" :rankings="rankingPlayers" @return="returnToTable" />
 
     <audio ref="audioRef" loop preload="auto" src="/audio/maple-onecard-bgm.mp3" />
   </div>
@@ -192,6 +99,15 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import GameActivityPanel from './shared/GameActivityPanel.vue';
+import OneCardColorPicker from './onecard/OneCardColorPicker.vue';
+import OneCardHandPanel from './onecard/OneCardHandPanel.vue';
+import OneCardPlayerPanel from './onecard/OneCardPlayerPanel.vue';
+import OneCardResultModal from './onecard/OneCardResultModal.vue';
+import { ONECARD_PROTOCOL } from '../../games/onecard/protocol';
+import { toSystemErrorMessage } from '../../games/errors';
+import { cardFace, cardTypeLabel, colorKoreanName, formatCard } from '../../games/onecard/presentation';
+import { projectOneCardState } from '../../games/onecard/state';
 
 const props = defineProps({
   gameConnection: { type: Object, required: true },
@@ -202,6 +118,7 @@ const room = computed(() => props.gameConnection ?? null);
 const mySessionId = computed(() => props.gameConnection?.sessionId ?? '');
 
 const state = ref(null);
+const privateHand = ref([]);
 const pendingCard = ref(null);
 const showColorPicker = ref(false);
 const messages = ref([]);
@@ -209,26 +126,38 @@ const audioRef = ref(null);
 const isBgmEnabled = ref(true);
 const bgmError = ref('');
 
-let boundRoomId = '';
+let boundRoom = null;
 
 watch(
   room,
   (nextRoom) => {
-    if (!nextRoom || boundRoomId === nextRoom.roomId) return;
+    if (!nextRoom || boundRoom === nextRoom) return;
+    boundRoom = nextRoom;
 
-    nextRoom.onStateChange((newState) => {
-      state.value = JSON.parse(JSON.stringify(newState));
-    });
+    const applyPublicState = (newState) => {
+      state.value = projectOneCardState(newState);
+    };
+    nextRoom.onStateChange(applyPublicState);
+    if (nextRoom.state) applyPublicState(nextRoom.state);
 
     nextRoom.onMessage('chat', (data) => {
       messages.value.push(data);
+    });
+
+    nextRoom.onMessage(ONECARD_PROTOCOL.messages.privateHand, (data) => {
+      privateHand.value = Array.isArray(data?.cards) ? data.cards : [];
+    });
+
+    nextRoom.onMessage('room_error', (data) => {
+      messages.value.push(toSystemErrorMessage(data));
     });
 
     nextRoom.onMessage('move_room', (data) => {
       emit('move-to-game', data);
     });
 
-    boundRoomId = nextRoom.roomId;
+    nextRoom.send(ONECARD_PROTOCOL.messages.requestPrivateState);
+
   },
   { immediate: true }
 );
@@ -240,7 +169,7 @@ const players = computed(() => {
 
 const myPlayer = computed(() => players.value.find((player) => player.sessionId === mySessionId.value));
 const isHost = computed(() => Boolean(myPlayer.value?.isHost));
-const myHand = computed(() => myPlayer.value?.hand || []);
+const myHand = computed(() => privateHand.value);
 
 const topCard = computed(() => {
   const pile = state.value?.discardPile || [];
@@ -255,111 +184,27 @@ const currentPlayerName = computed(() => {
   return player?.nickname || state.value.currentTurnId;
 });
 
-const playableCardCount = computed(() => myHand.value.filter((card) => canPlay(card)).length);
-
-function colorKoreanName(color) {
-  const names = { red: '빨강', yellow: '노랑', green: '초록', blue: '파랑', purple: '보라' };
-  return names[color] || '없음';
-}
-
-function cardTypeLabel(card) {
-  if (!card) return 'CARD';
-  if (card.type === 'number') return 'NUMBER';
-  if (['attack2', 'attack3'].includes(card.type)) return 'ATTACK';
-  return card.type.toUpperCase();
-}
-
-function cardFace(card) {
-  if (!card) return '–';
-  if (card.type === 'number') return card.number;
-  const faces = {
-    attack2: '+2',
-    attack3: '+3',
-    plus1: '+1',
-    oz: '+5',
-    jump: 'J',
-    reverse: 'R',
-    wild: 'W',
-    ikart: 'W',
-  };
-  return faces[card.type] || card.type.slice(0, 2).toUpperCase();
-}
-
-function formatCard(card) {
-  if (!card) return '카드 없음';
-  const color = colorKoreanName(card.color);
-  if (card.type === 'number') return `${color} ${card.number}`;
-  return `${color} ${cardTypeLabel(card)}`;
-}
-
-function playerInitial(nickname) {
-  return String(nickname || '?').trim().slice(0, 1);
-}
+const rankingPlayers = computed(() =>
+  (state.value?.rankings || []).map((id) => ({ id, name: getPlayerName(id) }))
+);
 
 function getPlayerName(sessionId) {
   const player = players.value.find((item) => item.sessionId === sessionId);
   return player?.nickname || sessionId;
 }
 
-function canPlay(card) {
-  if (!state.value || !isMyTurn.value) return false;
-
-  const top = topCard.value;
-
-  if (state.value.pendingAttack > 0) {
-    if (!top) return false;
-    if (top.type === 'oz') return ['mihile', 'ikart'].includes(card.type);
-    if (['mihile', 'ikart'].includes(card.type)) return true;
-
-    const attackValues = { attack2: 2, attack3: 3, oz: 5 };
-    if (!(card.type in attackValues)) return false;
-    return attackValues[card.type] >= (attackValues[top.type] || 0);
-  }
-
-  if (card.type === 'ikart') return true;
-  if (!top) return true;
-  if (card.color === state.value.currentColor) return true;
-
-  if (card.type === 'number' && top.type === 'number' && card.number === top.number) return true;
-
-  const specialTypes = [
-    'jump',
-    'reverse',
-    'plus1',
-    'wild',
-    'attack2',
-    'attack3',
-    'oz',
-    'mihile',
-    'hawkeye',
-    'irina',
-    'ikart',
-  ];
-
-  if (specialTypes.includes(card.type) && specialTypes.includes(top.type) && card.type === top.type) {
-    return true;
-  }
-
-  const attackValues = { attack2: 2, attack3: 3, oz: 5 };
-  if (card.type in attackValues && top.type in attackValues) {
-    return card.color === state.value.currentColor || attackValues[card.type] === attackValues[top.type];
-  }
-
-  return false;
-}
-
 function startGame() {
   if (!room.value || !isHost.value || players.value.length < 2) return;
   tryPlayBgm();
-  room.value.send('start_game');
+  room.value.send(ONECARD_PROTOCOL.messages.startGame);
 }
 
 function returnToTable() {
-  if (room.value) room.value.send('return_to_table');
+  if (room.value) room.value.send(ONECARD_PROTOCOL.messages.returnToTable);
 }
 
 function drawCard() {
-  if (room.value) room.value.send('draw_card');
+  if (room.value) room.value.send(ONECARD_PROTOCOL.messages.drawCard);
 }
 
 function onClickCard(card) {
@@ -372,14 +217,14 @@ function onClickCard(card) {
     return;
   }
 
-  room.value.send('play_card', { cardId: card.id });
+  room.value.send(ONECARD_PROTOCOL.messages.playCard, { cardId: card.id });
 }
 
 function submitSelectedCard(color) {
   if (!room.value || !pendingCard.value) return;
   tryPlayBgm();
 
-  room.value.send('play_card', {
+  room.value.send(ONECARD_PROTOCOL.messages.playCard, {
     cardId: pendingCard.value.id,
     chosenColor: color,
   });
@@ -584,10 +429,7 @@ onBeforeUnmount(() => {
   gap: var(--space-4);
 }
 
-.discard-panel,
-.players-panel,
-.hand-panel,
-.activity-panel {
+.discard-panel {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
@@ -636,133 +478,6 @@ onBeforeUnmount(() => {
   border-color: var(--color-border);
   background: var(--color-surface-muted);
   color: var(--color-meta);
-  box-shadow: none;
-}
-
-.players-panel,
-.hand-panel,
-.activity-panel {
-  padding: var(--space-4);
-}
-
-.panel-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-
-.panel-heading h2 {
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: -0.015em;
-}
-
-.panel-heading > span {
-  color: var(--color-muted);
-  font-size: 13px;
-}
-
-.player-list {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.player-row {
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.player-row:last-child {
-  border-bottom: 0;
-}
-
-.player-row.current {
-  border-radius: var(--radius-small);
-  border-bottom-color: transparent;
-  background: var(--color-surface-muted);
-}
-
-.player-row.bankrupt {
-  opacity: 0.55;
-}
-
-.avatar {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--color-surface-muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.player-copy {
-  min-width: 0;
-}
-
-.player-copy strong,
-.player-copy small {
-  display: block;
-}
-
-.player-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.player-copy small {
-  color: var(--color-muted);
-}
-
-.me-label {
-  margin-left: 4px;
-  color: var(--color-focus);
-  font-size: 11px;
-}
-
-.card-count {
-  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.hand-panel {
-  overflow: hidden;
-}
-
-.hand-scroll {
-  display: flex;
-  gap: var(--space-3);
-  overflow-x: auto;
-  padding: var(--space-2) var(--space-1) var(--space-3);
-  scrollbar-width: thin;
-}
-
-.hand-card {
-  flex: 0 0 118px;
-  cursor: pointer;
-  transition:
-    translate 150ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 150ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.hand-card.playable:not(:disabled):hover {
-  translate: 0 -6px;
-}
-
-.hand-card:disabled {
-  cursor: not-allowed;
-  filter: grayscale(0.35);
-  opacity: 0.44;
   box-shadow: none;
 }
 
@@ -817,58 +532,10 @@ onBeforeUnmount(() => {
   opacity: 0.42;
 }
 
-.action-note,
-.empty-state,
-.empty-activity,
-.rule-note,
-.modal-copy {
+.action-note {
   margin: 0;
   color: var(--color-muted);
   font-size: 14px;
-}
-
-.activity-panel {
-  position: sticky;
-  top: 84px;
-}
-
-.activity-log {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.activity-line {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
-  gap: var(--space-2);
-  margin: 0;
-  color: var(--color-muted);
-  font-size: 14px;
-}
-
-.activity-line::before {
-  width: 6px;
-  height: 6px;
-  margin-top: 8px;
-  border-radius: 50%;
-  background: var(--color-border);
-  content: '';
-}
-
-.activity-line strong,
-.activity-line span {
-  grid-column: 2;
-}
-
-.activity-line strong {
-  color: var(--color-ink-soft);
-}
-
-.rule-note {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border-soft);
-  line-height: 1.55;
 }
 
 .bgm-error {
@@ -877,74 +544,11 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: var(--space-4);
-  background: rgba(49, 48, 46, 0.42);
-  backdrop-filter: blur(6px);
-}
-
-.modal {
-  width: min(100%, 420px);
-  padding: var(--space-6);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
-}
-
-.modal h2 {
-  margin: 0;
-  font-size: 26px;
-}
-
-.modal-copy {
-  margin-top: var(--space-2);
-}
-
-.color-options {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-2);
-  margin-top: var(--space-5);
-}
-
-.color-option {
-  min-height: 48px;
-  border: 1px solid currentColor;
-  border-radius: var(--radius-control);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.modal-cancel,
-.result-modal .button-primary {
-  width: 100%;
-  margin-top: var(--space-2);
-}
-
-.ranking-list {
-  margin: var(--space-5) 0;
-  padding-left: var(--space-6);
-}
-
-.ranking-list li {
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
 @media (max-width: 980px) {
   .game-layout {
     grid-template-columns: 1fr;
   }
 
-  .activity-panel {
-    position: static;
-  }
 }
 
 @media (max-width: 720px) {
@@ -1014,14 +618,5 @@ onBeforeUnmount(() => {
     border-bottom: 0;
   }
 
-  .color-options {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hand-card {
-    transition: none;
-  }
 }
 </style>

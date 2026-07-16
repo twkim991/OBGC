@@ -68,7 +68,7 @@
         </div>
       </div>
       <form @submit.prevent="sendMessage" class="input-area">
-        <input v-model="inputMessage" aria-label="채팅 메시지" placeholder="메시지를 입력하세요" />
+        <input v-model="inputMessage" maxlength="300" aria-label="채팅 메시지" placeholder="메시지를 입력하세요" />
         <button type="submit">전송</button>
       </form>
     </section>
@@ -76,8 +76,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, nextTick, watch } from 'vue';
 import { DEFAULT_GAME_ID, GAME_CATALOG, gameLabel } from '../games';
+import { toSystemErrorMessage } from '../games/errors';
 
 const props = defineProps(['tableConnection']);
 const emit = defineEmits(['leave-table', 'move-to-game']);
@@ -90,17 +91,22 @@ const messages = ref([]);
 const inputMessage = ref('');
 const chatBox = ref(null);
 
-onMounted(() => {
-  if (props.tableConnection) {
-    setupListeners();
-  }
-});
+let boundConnection = null;
 
-const setupListeners = () => {
-  const connection = props.tableConnection;
+watch(
+  () => props.tableConnection,
+  (connection) => {
+    if (!connection || boundConnection === connection) return;
+    boundConnection = connection;
+    setupListeners(connection);
+  },
+  { immediate: true }
+);
+
+function setupListeners(connection) {
 
   // 내 상태 확인 (방장 여부)
-  connection.onStateChange((state) => {
+  const applyPublicState = (state) => {
     const me = state.players.get(connection.sessionId);
     if (me) isHost.value = me.isHost;
 
@@ -110,11 +116,18 @@ const setupListeners = () => {
       selectedGame.value = nextGame;
       draftGame.value = nextGame;
     }
-  });
+  };
+  connection.onStateChange(applyPublicState);
+  if (connection.state) applyPublicState(connection.state);
 
   // 채팅 수신
   connection.onMessage('chat', (data) => {
     messages.value.push(data);
+    scrollToBottom();
+  });
+
+  connection.onMessage('room_error', (data) => {
+    messages.value.push(toSystemErrorMessage(data));
     scrollToBottom();
   });
 
@@ -128,7 +141,7 @@ const startGame = () => {
   if (props.tableConnection && isHost.value) {
     props.tableConnection.send('start_game');
   }
-};
+}
 
 const changeGame = () => {
   if (!props.tableConnection || !isHost.value || draftGame.value === selectedGame.value) return;

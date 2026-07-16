@@ -1,58 +1,53 @@
 // server\src\rooms\MapleOneCardRoom.ts
-import { Room, Client, matchMaker } from 'colyseus';
-import { Schema, MapSchema, ArraySchema, type } from '@colyseus/schema';
-import { createDeck as createOneCardDeck, shuffle } from './maple-onecard/deck';
+import { Room, Client } from 'colyseus';
+import { createRematchTable } from '../games/rematch';
 import {
-  canDefendAttack,
+  readChatMessage,
+  sendRoomError,
+  SlidingWindowRateLimiter,
+} from '../games/protocol';
+import {
+  MigrationSeatRegistry,
+  isMigrationGroupReady,
+  MIGRATION_ABORT_MS,
+  MIGRATION_RETRY_MS,
+  MIGRATION_SEAT_SECONDS,
+  type MigrationParticipant,
+} from '../games/migration';
+import { MAPLE_ONE_CARD_GAME } from '../games/onecard/metadata';
+import {
+  buildTurnPriorityMap,
+  dealOneCardGame,
+  getNextTurnId,
+  rankPlayers,
+} from '../games/onecard/domain/engine';
+import {
+  isBankruptHand,
+  prepareDiscardRefill,
+  removeColorFromHands,
+  resolveCardEffect,
+  type OneCardEffect,
+} from '../games/onecard/domain/effects';
+import {
+  MapleOneCardState,
+  OneCardCard,
+  OneCardPlayer,
+} from '../games/onecard/schema';
+import {
+  ONECARD_MESSAGES,
+  parsePlayCardPayload,
+} from '../games/onecard/protocol';
+import { logRoomError, logRoomEvent } from '../games/logging';
+import {
+  createDeck as createOneCardDeck,
+  shuffle,
+} from '../games/onecard/domain/deck';
+import {
+  canPlayCard,
   getAttackValue,
   isAttackCard,
-} from './maple-onecard/rules';
-import type { Card, CardColor, CardType } from './maple-onecard/types';
-
-// --- 스키마 정의 ---
-export class OneCardCard extends Schema {
-  @type('string') id: string = '';
-  @type('string') color: CardColor = 'red';
-  @type('string') type: CardType = 'number';
-  @type('number') number: number = 0; // 숫자카드가 아니면 0
-}
-
-export class OneCardPlayer extends Schema {
-  @type('string') sessionId: string = '';
-  @type('string') playerId: string = '';
-  @type('string') nickname: string = '';
-  @type('boolean') isHost: boolean = false;
-  @type([OneCardCard]) hand = new ArraySchema<OneCardCard>();
-
-  @type('boolean') alive: boolean = true;
-  @type('boolean') bankrupt: boolean = false;
-  @type('number') rank: number = 0;
-
-  // 미하일 지속용: "다음 자신의 턴 종료시까지"
-  @type('boolean') shieldActive: boolean = false;
-  @type('boolean') shieldPendingExpire: boolean = false;
-}
-
-export class MapleOneCardState extends Schema {
-  @type({ map: OneCardPlayer }) players = new MapSchema<OneCardPlayer>();
-  @type('string') hostPlayerId: string = '';
-
-  @type([OneCardCard]) deck = new ArraySchema<OneCardCard>();
-  @type([OneCardCard]) discardPile = new ArraySchema<OneCardCard>();
-
-  @type('string') currentTurnId: string = '';
-  @type('number') direction: number = 1; // 1 or -1
-  @type('string') gamePhase: string = 'waiting'; // waiting, playing, finished
-
-  @type('string') currentColor: string = '';
-  @type('number') pendingAttack: number = 0;
-
-  @type('string') winnerSessionId: string = '';
-  @type(['string']) rankings = new ArraySchema<string>();
-
-  @type('string') lastAction: string = '';
-  @type('number') turnCount: number = 0;
-}
+} from '../games/onecard/domain/rules';
+import type { Card } from '../games/onecard/domain/types';
 
 function toSchemaCard(source: Card): OneCardCard {
   const card = new OneCardCard();
@@ -74,28 +69,61 @@ function getTopCard(state: MapleOneCardState): OneCardCard | null {
 
 export class MapleOneCardRoom extends Room<MapleOneCardState> {
   private isReturning = false;
+  private deck: OneCardCard[] = [];
+  private readonly hands = new Map<string, OneCardCard[]>();
+  private readonly playerIds = new Map<string, string>();
+  private readonly chatLimiter = new SlidingWindowRateLimiter(5, 5000);
+  private readonly clientProtocols = new Map<string, Record<string, number>>();
+  private migrationSeats = new MigrationSeatRegistry();
 
   onCreate(options: any) {
     this.setState(new MapleOneCardState());
-    this.maxClients = 4;
-    this.state.hostPlayerId = this.readIdentity(options?.hostPlayerId, '');
+    this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
+    this.migrationSeats = new MigrationSeatRegistry(options);
+    this.maxClients = this.migrationSeats.total || MAPLE_ONE_CARD_GAME.maxPlayers;
+    this.clock.setTimeout(async () => {
+      if (this.state.migrationReady) return;
+      this.migrationSeats.expire();
+      this.logRejectedRequest('MIGRATION_TIMEOUT', 'onecard.migration_aborted');
+      this.broadcast('migration_aborted', {
+        message: '모든 참가자가 제한 시간 안에 게임방으로 이동하지 못했습니다.',
+      });
+      await this.disconnect();
+    }, MIGRATION_ABORT_MS);
+
+    this.onMessage(ONECARD_MESSAGES.requestPrivateState, (client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player) this.syncPrivateHand(player);
+    });
 
     this.onMessage('chat', (client, message) => {
+      const normalized = readChatMessage(message);
+      if (!normalized) {
+        this.logRejectedRequest('INVALID_CHAT');
+        sendRoomError(client, 'INVALID_CHAT', '채팅은 1~300자로 입력해주세요.');
+        return;
+      }
+      if (!this.chatLimiter.allow(client.sessionId)) {
+        this.logRejectedRequest('CHAT_RATE_LIMIT');
+        sendRoomError(client, 'CHAT_RATE_LIMIT', '채팅을 너무 빠르게 보내고 있습니다.');
+        return;
+      }
+
       const player = this.state.players.get(client.sessionId);
       this.broadcast('chat', {
         clientId: player?.nickname ?? client.sessionId,
-        message: `[메이플원카드] ${message}`,
+        message: `[메이플원카드] ${normalized}`,
       });
     });
 
-    this.onMessage('start_game', (client) => {
+    this.onMessage(ONECARD_MESSAGES.startGame, (client) => {
       if (this.state.gamePhase !== 'waiting') return;
       const player = this.state.players.get(client.sessionId);
       if (!player?.isHost) return;
-      if (this.state.players.size < 2) {
+      if (this.state.players.size < MAPLE_ONE_CARD_GAME.minPlayers) {
         client.send('chat', {
           clientId: 'System',
-          message: '원카드는 2명 이상 모여야 시작할 수 있습니다.',
+          message: `${MAPLE_ONE_CARD_GAME.label}는 ${MAPLE_ONE_CARD_GAME.minPlayers}명 이상 모여야 시작할 수 있습니다.`,
         });
         return;
       }
@@ -108,43 +136,65 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     });
 
     this.onMessage(
-      'play_card',
-      (client, payload: { cardId: string; chosenColor?: string }) => {
+      ONECARD_MESSAGES.playCard,
+      (client, payload: unknown) => {
         if (this.state.gamePhase !== 'playing') return;
         if (client.sessionId !== this.state.currentTurnId) return;
 
         const player = this.state.players.get(client.sessionId);
         if (!player || !player.alive || player.bankrupt) return;
 
-        const cardIndex = player.hand.findIndex((c) => c.id === payload.cardId);
-        if (cardIndex === -1) return;
+        const parsedPayload = parsePlayCardPayload(payload);
+        if (!parsedPayload) {
+          this.rejectRequest(client, 'INVALID_PAYLOAD', '카드 정보가 올바르지 않습니다.');
+          return;
+        }
+        const { cardId, chosenColor } = parsedPayload;
 
-        const card = player.hand[cardIndex];
-        if (!this.canPlayCard(player, card)) return;
+        const hand = this.getHand(player);
+        const cardIndex = hand.findIndex((card) => card.id === cardId);
+        if (cardIndex === -1) {
+          this.rejectRequest(client, 'CARD_NOT_OWNED', '보유하지 않은 카드입니다.');
+          return;
+        }
+
+        const card = hand[cardIndex];
+        if (
+          !canPlayCard({
+            card,
+            topCard: getTopCard(this.state),
+            currentColor: this.state.currentColor,
+            pendingAttack: this.state.pendingAttack,
+          })
+        ) {
+          this.rejectRequest(client, 'ILLEGAL_CARD', '현재 낼 수 없는 카드입니다.');
+          return;
+        }
 
         const topBefore = getTopCard(this.state);
 
-        player.hand.splice(cardIndex, 1);
+        hand.splice(cardIndex, 1);
 
         // 이카르트는 discardPile에 남지 않음
         if (card.type !== 'ikart') {
           this.state.discardPile.push(card);
         }
 
-        this.applyCardEffect(player, card, payload.chosenColor, topBefore);
+        this.applyCardEffect(player, card, chosenColor, topBefore);
 
         // 현재 턴 플레이어가 이리나 등으로 0장 될 수 있음
-        if (player.hand.length === 0 && !this.state.winnerSessionId) {
+        if (this.getHand(player).length === 0 && !this.state.winnerSessionId) {
           this.finishGame(player.sessionId);
           return;
         }
 
         this.checkBankruptAll();
         this.checkForcedGameEnd();
+        this.syncAllPrivateHands();
       },
     );
 
-    this.onMessage('draw_card', (client) => {
+    this.onMessage(ONECARD_MESSAGES.drawCard, (client) => {
       if (this.state.gamePhase !== 'playing') return;
       if (client.sessionId !== this.state.currentTurnId) return;
 
@@ -179,25 +229,65 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
       this.checkForcedGameEnd();
     });
 
-    this.onMessage('return_to_table', async (client) => {
+    this.onMessage(ONECARD_MESSAGES.returnToTable, async (client) => {
       if (this.state.gamePhase !== 'finished' || this.isReturning) return;
       this.isReturning = true;
 
       try {
-        const newTable = await matchMaker.createRoom('table_room', {
-          roomName: '메이플 원카드 리매치',
-          gameType: 'onecard',
-        });
+        const participants = this.clients.reduce<MigrationParticipant[]>(
+          (result, participantClient) => {
+            const player = this.state.players.get(participantClient.sessionId);
+            if (player) {
+              result.push({
+                sourceSessionId: participantClient.sessionId,
+                playerId:
+                  this.playerIds.get(participantClient.sessionId) ??
+                  participantClient.sessionId,
+                nickname: player.nickname,
+                isHost: player.isHost,
+                protocolVersions:
+                  this.clientProtocols.get(participantClient.sessionId) ?? {},
+              });
+            }
+            return result;
+          },
+          [],
+        );
+        const migration = await createRematchTable(
+          MAPLE_ONE_CARD_GAME,
+          participants,
+        );
 
-        this.broadcast('move_room', {
-          roomId: newTable.roomId,
-          gameType: 'table',
+        this.clients.forEach((participantClient) => {
+          const reservation = migration.reservations.get(
+            participantClient.sessionId,
+          );
+          if (!reservation) return;
+          participantClient.send('move_room', {
+            reservation,
+            gameType: 'table',
+          });
         });
+        this.clock.setTimeout(() => {
+          this.isReturning = false;
+        }, MIGRATION_RETRY_MS);
       } catch (e) {
-        console.error('대기실 복귀 실패:', e);
+        logRoomError('onecard.rematch_migration_failed', e, {
+          roomId: this.roomId,
+          gameId: MAPLE_ONE_CARD_GAME.id,
+        });
         this.isReturning = false;
       }
     });
+  }
+
+  onAuth(client: Client, options: unknown) {
+    const authorized =
+      this.migrationSeats.total > 0 &&
+      !this.migrationSeats.isComplete &&
+      this.migrationSeats.authorize(options);
+    if (!authorized) this.logRejectedRequest('INVALID_MIGRATION_SEAT');
+    return authorized;
   }
 
   onJoin(client: Client, options: any) {
@@ -206,29 +296,32 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
       return;
     }
 
+    const migrationSeat = this.migrationSeats.claim(options);
+    if (!migrationSeat) {
+      this.logRejectedRequest('MIGRATION_SEAT_ALREADY_USED');
+      client.leave();
+      return;
+    }
+
     const player = new OneCardPlayer();
     player.sessionId = client.sessionId;
-    player.playerId = this.readIdentity(options?.playerId, client.sessionId);
-    player.nickname = this.readIdentity(
-      options?.nickname,
-      `플레이어 ${player.playerId.slice(0, 4)}`,
-    );
+    this.playerIds.set(client.sessionId, migrationSeat.playerId);
+    player.nickname = migrationSeat.nickname;
+    player.isHost = migrationSeat.isHost;
+    this.clientProtocols.set(client.sessionId, migrationSeat.protocolVersions);
 
-    const isFirstPlayer = this.state.players.size === 0;
-    const isDesignatedHost =
-      this.state.hostPlayerId !== '' &&
-      player.playerId === this.state.hostPlayerId;
-    player.isHost =
-      isDesignatedHost || (isFirstPlayer && this.state.hostPlayerId === '');
-
-    if (isDesignatedHost) {
+    if (player.isHost) {
       this.state.players.forEach(
         (existingPlayer) => (existingPlayer.isHost = false),
       );
+      this.state.hostSessionId = client.sessionId;
     }
-    if (player.isHost) this.state.hostPlayerId = player.playerId;
 
     this.state.players.set(client.sessionId, player);
+    this.hands.set(client.sessionId, []);
+    this.syncPrivateHand(player);
+
+    this.finalizeMigrationIfReady();
 
     this.broadcast('chat', {
       clientId: 'System',
@@ -236,7 +329,27 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     });
   }
 
-  onLeave(client: Client) {
+  async onLeave(client: Client, consented: boolean) {
+    if (!consented) {
+      try {
+        const reconnectedClient = await this.allowReconnection(client, 20);
+        const reconnectedPlayer = this.state.players.get(client.sessionId);
+        if (reconnectedPlayer) {
+          const currentClient = this.clients.find(
+            (candidate) => candidate.sessionId === reconnectedClient.sessionId,
+          );
+          if (currentClient) this.syncPrivateHand(reconnectedPlayer);
+        }
+        this.finalizeMigrationIfReady();
+        return;
+      } catch {
+        // 재연결 제한 시간이 지나면 아래의 일반 퇴장 처리를 수행한다.
+      }
+    }
+
+    this.chatLimiter.clear(client.sessionId);
+    this.clientProtocols.delete(client.sessionId);
+    this.playerIds.delete(client.sessionId);
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
 
@@ -244,6 +357,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     if (this.state.gamePhase === 'waiting') {
       const wasHost = player.isHost;
       this.state.players.delete(client.sessionId);
+      this.hands.delete(client.sessionId);
       if (wasHost) this.transferHost();
       return;
     }
@@ -269,7 +383,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   // --- 게임 시작 ---
   private startGame(hostSessionId: string) {
-    this.state.deck.clear();
+    this.deck = [];
     this.state.discardPile.clear();
     this.state.rankings.clear();
     this.state.winnerSessionId = '';
@@ -279,42 +393,29 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     this.state.lastAction = '게임 시작';
     this.state.gamePhase = 'playing';
 
-    const rawDeck = createSchemaDeck();
+    const ids = Array.from(this.state.players.keys());
+    const deal = dealOneCardGame(createSchemaDeck(), ids, 7, shuffle);
 
     this.state.players.forEach((player) => {
-      player.hand.clear();
       player.alive = true;
       player.bankrupt = false;
       player.rank = 0;
       player.shieldActive = false;
       player.shieldPendingExpire = false;
 
-      for (let i = 0; i < 7; i++) {
-        const card = rawDeck.shift();
-        if (card) player.hand.push(card);
-      }
+      this.hands.set(player.sessionId, deal.hands.get(player.sessionId) ?? []);
+      this.syncPrivateHand(player);
     });
 
-    // 시작 카드 오픈
-    let first = rawDeck.shift();
-    while (first && first.type === 'ikart') {
-      rawDeck.push(first);
-      const reshuffled = shuffle(rawDeck);
-      rawDeck.length = 0;
-      rawDeck.push(...reshuffled);
-      first = rawDeck.shift();
-    }
-
-    if (first) {
-      this.state.discardPile.push(first);
-      this.state.currentColor = first.color === 'purple' ? '' : first.color;
+    if (deal.firstCard) {
+      this.state.discardPile.push(deal.firstCard);
+      this.state.currentColor =
+        deal.firstCard.color === 'purple' ? '' : deal.firstCard.color;
     } else {
       this.state.currentColor = '';
     }
 
-    rawDeck.forEach((card) => this.state.deck.push(card));
-
-    const ids = Array.from(this.state.players.keys());
+    this.deck = deal.deck;
     this.state.currentTurnId = ids.includes(hostSessionId)
       ? hostSessionId
       : ids[0] || '';
@@ -330,68 +431,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
         this.state.currentColor || '-'
       }`,
     });
-  }
-
-  // --- 카드 제출 가능 여부 ---
-  private canPlayCard(player: OneCardPlayer, card: OneCardCard): boolean {
-    const top = getTopCard(this.state);
-
-    // 공격 진행 중이면 공격 대응 규칙 우선
-    if (this.state.pendingAttack > 0) {
-      if (!top) return false;
-      return canDefendAttack(top, card);
-    }
-
-    // 이카르트는 언제든 가능
-    if (card.type === 'ikart') return true;
-
-    // 첫 카드면 허용
-    if (!top) return true;
-
-    // 현재 색상 일치
-    if (card.color === this.state.currentColor) return true;
-
-    // 숫자 일치
-    if (
-      card.type === 'number' &&
-      top.type === 'number' &&
-      card.number === top.number
-    ) {
-      return true;
-    }
-
-    // 특수카드끼리만 타입 일치 허용
-    const specialTypes = [
-      'jump',
-      'reverse',
-      'plus1',
-      'wild',
-      'attack2',
-      'attack3',
-      'oz',
-      'mihile',
-      'hawkeye',
-      'irina',
-      'ikart',
-    ];
-
-    if (
-      specialTypes.includes(card.type) &&
-      specialTypes.includes(top.type) &&
-      card.type === top.type
-    ) {
-      return true;
-    }
-
-    // 공격카드끼리 일반 상황 추가 허용
-    if (isAttackCard(card) && isAttackCard(top)) {
-      return (
-        card.color === this.state.currentColor ||
-        getAttackValue(card) === getAttackValue(top)
-      );
-    }
-
-    return false;
+    this.syncAllPrivateHands();
   }
 
   // --- 카드 효과 적용 ---
@@ -402,184 +442,63 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     topBefore?: OneCardCard | null,
   ) {
     const playerName = player.nickname;
-    const aliveCount = this.getAlivePlayers().length;
+    const effect = resolveCardEffect({
+      card,
+      chosenColor,
+      pendingAttack: this.state.pendingAttack,
+      alivePlayerCount: this.getAlivePlayers().length,
+      currentColor: this.state.currentColor,
+      topCardBefore: topBefore ?? null,
+    });
 
-    switch (card.type) {
-      case 'number': {
-        this.state.currentColor = card.color;
-        this.state.lastAction = `${playerName}: 숫자 카드`;
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🃏 ${playerName}님이 ${this.formatCard(card)}를 냈습니다.`,
-        });
-        this.passTurn();
-        return;
-      }
-
-      case 'jump': {
-        this.state.currentColor = card.color;
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `⏭️ ${playerName}님이 점프 카드를 냈습니다.`,
-        });
-
-        if (aliveCount === 2) {
-          // 2인전에서는 +1처럼 자기 턴 유지
-          return;
-        }
-
-        this.passTurn(2);
-        return;
-      }
-
-      case 'reverse': {
-        this.state.currentColor = card.color;
-        this.state.direction *= -1;
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🔄 ${playerName}님이 리버스 카드를 냈습니다.`,
-        });
-        this.passTurn();
-        return;
-      }
-
-      case 'plus1': {
-        this.state.currentColor = card.color;
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `➕ ${playerName}님이 +1 카드를 냈습니다. 한 번 더 진행합니다.`,
-        });
-        // 자기 턴 유지
-        return;
-      }
-
-      case 'wild': {
-        this.state.currentColor = this.normalizeChosenColor(chosenColor);
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🌈 ${playerName}님이 색깔 바꾸기 카드를 냈습니다. 현재 색상: ${this.state.currentColor}`,
-        });
-        this.passTurn();
-        return;
-      }
-
-      case 'attack2':
-      case 'attack3': {
-        this.state.currentColor = card.color;
-        this.state.pendingAttack += getAttackValue(card);
-
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🔥 ${playerName}님이 ${this.formatCard(
-            card,
-          )}를 사용했습니다. 누적 공격: ${this.state.pendingAttack}`,
-        });
-
-        this.passTurn();
-        return;
-      }
-
-      case 'oz': {
-        this.state.currentColor = card.color;
-        this.state.pendingAttack += 5;
-
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🔥🔥 ${playerName}님이 오즈를 사용했습니다. 누적 공격: ${this.state.pendingAttack}`,
-        });
-
-        this.passTurn();
-        return;
-      }
-
-      case 'mihile': {
-        this.state.currentColor = card.color;
-
-        player.shieldActive = true;
-        player.shieldPendingExpire = false;
-
-        this.state.pendingAttack = 0;
-
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🛡️ ${playerName}님이 미하일을 사용했습니다. 공격을 무효화합니다.`,
-        });
-
-        this.passTurn();
-        return;
-      }
-
-      case 'hawkeye': {
-        this.state.currentColor = card.color;
-
-        this.state.players.forEach((other, otherId) => {
-          if (otherId === player.sessionId) return;
-          if (!other.alive || other.bankrupt) return;
-          this.drawCards(other, 2);
-        });
-
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🎯 ${playerName}님이 호크아이를 사용했습니다. 자신을 제외한 모두가 2장씩 받습니다.`,
-        });
-
-        this.checkBankruptAll();
-        if (this.state.gamePhase === 'finished') return;
-
-        this.passTurn();
-        return;
-      }
-
-      case 'irina': {
-        this.handleIrina(player, chosenColor);
-        return;
-      }
-
-      case 'ikart': {
-        // discardPile에 쌓이지 않음
-        // currentColor 유지
-        // 공격 중이면 pendingAttack 유지한 채 다음으로 넘김
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🫥 ${playerName}님이 이카르트를 사용했습니다.`,
-        });
-
-        // topBefore의 색 유지
-        if (topBefore && topBefore.color !== 'purple') {
-          this.state.currentColor = this.state.currentColor || topBefore.color;
-        }
-
-        this.passTurn();
-        return;
-      }
-
-      default:
-        return;
+    if (effect.currentColor !== undefined) {
+      this.state.currentColor = effect.currentColor;
     }
+    if (effect.pendingAttack !== undefined) {
+      this.state.pendingAttack = effect.pendingAttack;
+    }
+    this.state.direction *= effect.directionMultiplier;
+    this.state.lastAction = `${playerName}: ${effect.actionLabel}`;
+
+    if (effect.activateShield) {
+      player.shieldActive = true;
+      player.shieldPendingExpire = false;
+    }
+
+    if (effect.special === 'irina') {
+      this.handleIrina(player, effect.currentColor ?? 'red');
+      return;
+    }
+
+    if (effect.special === 'draw_others') {
+      this.state.players.forEach((other, otherId) => {
+        if (otherId === player.sessionId || !other.alive || other.bankrupt) return;
+        this.drawCards(other, effect.drawOtherCount);
+      });
+      this.checkBankruptAll();
+    }
+
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: this.cardEffectMessage(playerName, card, effect),
+    });
+
+    if (this.state.gamePhase === 'finished') return;
+    if (effect.turnStep > 0) this.passTurn(effect.turnStep);
   }
 
-  private handleIrina(player: OneCardPlayer, chosenColor?: string) {
+  private handleIrina(player: OneCardPlayer, nextColor: string) {
+    const result = removeColorFromHands(this.hands, 'green');
+    result.hands.forEach((hand, sessionId) => this.hands.set(sessionId, hand));
+    this.deck.push(...result.removedCards);
+
     this.state.players.forEach((p) => {
-      const kept: OneCardCard[] = [];
-      const removedGreens: OneCardCard[] = [];
-
-      for (const card of p.hand) {
-        if (card.color === 'green') removedGreens.push(card);
-        else kept.push(card);
-      }
-
-      p.hand.clear();
-      kept.forEach((card) => p.hand.push(card));
-      removedGreens.forEach((card) => this.state.deck.push(card));
+      this.syncPrivateHand(p);
     });
 
     // deck 재셔플
-    const shuffled = shuffle(Array.from(this.state.deck));
-    this.state.deck.clear();
-    shuffled.forEach((card) => this.state.deck.push(card));
+    this.deck = shuffle(this.deck);
 
-    let nextColor = this.normalizeChosenColor(chosenColor);
-    if (nextColor === 'green') nextColor = 'red';
     this.state.currentColor = nextColor;
 
     this.broadcast('chat', {
@@ -589,7 +508,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
     // 이리나로 인해 누군가 0장 될 수 있음
     const zeroPlayers = this.getAlivePlayers().filter(
-      (p) => p.hand.length === 0,
+      (p) => this.getHand(p).length === 0,
     );
     if (zeroPlayers.length > 0) {
       const me = zeroPlayers.find((p) => p.sessionId === player.sessionId);
@@ -602,34 +521,32 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   // --- 드로우 ---
   private drawCards(player: OneCardPlayer, count: number) {
+    const hand = this.getHand(player);
+
     for (let i = 0; i < count; i++) {
-      if (this.state.deck.length === 0) {
+      if (this.deck.length === 0) {
         this.refillDeck();
       }
 
-      if (this.state.deck.length === 0) return;
+      if (this.deck.length === 0) break;
 
-      const card = this.state.deck.shift();
-      if (card) player.hand.push(card);
+      const card = this.deck.shift();
+      if (card) hand.push(card);
     }
+
+    this.syncPrivateHand(player);
   }
 
   private refillDeck() {
-    if (this.state.discardPile.length <= 1) return;
-
-    const top = this.state.discardPile[this.state.discardPile.length - 1];
-    const rest: OneCardCard[] = [];
-
-    for (let i = 0; i < this.state.discardPile.length - 1; i++) {
-      rest.push(this.state.discardPile[i]);
-    }
-
-    const shuffled = shuffle(rest);
+    const refill = prepareDiscardRefill(
+      Array.from(this.state.discardPile),
+      shuffle,
+    );
+    if (refill.refillCards.length === 0) return;
 
     this.state.discardPile.clear();
-    if (top) this.state.discardPile.push(top);
-
-    shuffled.forEach((card) => this.state.deck.push(card));
+    if (refill.topCard) this.state.discardPile.push(refill.topCard);
+    this.deck.push(...refill.refillCards);
   }
 
   // --- 턴 처리 ---
@@ -647,17 +564,14 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
       }
     }
 
-    let currentIndex = aliveIds.indexOf(this.state.currentTurnId);
-    if (currentIndex === -1) currentIndex = 0;
-
-    for (let i = 0; i < step; i++) {
-      currentIndex =
-        (currentIndex + this.state.direction + aliveIds.length) %
-        aliveIds.length;
-    }
-
-    this.state.currentTurnId = aliveIds[currentIndex];
+    this.state.currentTurnId = getNextTurnId({
+      playerIds: aliveIds,
+      currentTurnId: this.state.currentTurnId,
+      direction: this.state.direction,
+      step,
+    });
     this.state.turnCount += 1;
+    this.syncAllPrivateHands();
   }
 
   private getAlivePlayers() {
@@ -674,7 +588,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   // --- 파산 / 종료 ---
   private checkBankrupt(player: OneCardPlayer) {
-    if (player.hand.length > 17) {
+    if (isBankruptHand(this.getHand(player).length)) {
       player.bankrupt = true;
       player.alive = false;
 
@@ -705,27 +619,22 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     this.state.rankings.clear();
 
     const aliveIds = this.getAlivePlayerIds();
-    const turnPriority = this.buildTurnPriorityMap(aliveIds);
+    const turnPriority = buildTurnPriorityMap(aliveIds, this.state.currentTurnId);
+    const rankingIds = rankPlayers(
+      Array.from(this.state.players.values()).map((player) => ({
+        sessionId: player.sessionId,
+        bankrupt: player.bankrupt,
+        handCount: this.getHand(player).length,
+      })),
+      winnerSessionId,
+      turnPriority,
+    );
 
-    const sorted = Array.from(this.state.players.values()).sort((a, b) => {
-      if (a.sessionId === winnerSessionId) return -1;
-      if (b.sessionId === winnerSessionId) return 1;
-
-      if (a.bankrupt && !b.bankrupt) return 1;
-      if (!a.bankrupt && b.bankrupt) return -1;
-
-      if (a.hand.length !== b.hand.length) {
-        return a.hand.length - b.hand.length;
-      }
-
-      return (
-        (turnPriority[a.sessionId] ?? 999) - (turnPriority[b.sessionId] ?? 999)
-      );
-    });
-
-    sorted.forEach((player, idx) => {
+    rankingIds.forEach((sessionId, idx) => {
+      const player = this.state.players.get(sessionId);
+      if (!player) return;
       player.rank = idx + 1;
-      this.state.rankings.push(player.sessionId);
+      this.state.rankings.push(sessionId);
     });
 
     const winner = this.state.players.get(winnerSessionId);
@@ -735,39 +644,46 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
         winner?.nickname || winnerSessionId
       }님이 1위를 차지했습니다.`,
     });
-  }
-
-  private buildTurnPriorityMap(aliveIds: string[]) {
-    const map: Record<string, number> = {};
-    if (aliveIds.length === 0) return map;
-
-    let currentIndex = aliveIds.indexOf(this.state.currentTurnId);
-    if (currentIndex === -1) currentIndex = 0;
-
-    for (let i = 0; i < aliveIds.length; i++) {
-      map[aliveIds[(currentIndex + i) % aliveIds.length]] = i;
-    }
-
-    return map;
+    this.syncAllPrivateHands();
   }
 
   // --- 기타 ---
-  private normalizeChosenColor(color?: string) {
-    if (
-      color === 'red' ||
-      color === 'yellow' ||
-      color === 'green' ||
-      color === 'blue'
-    ) {
-      return color;
-    }
-    return 'red';
-  }
-
   private formatCard(card: OneCardCard | null | undefined) {
     if (!card) return '없음';
     if (card.type === 'number') return `${card.color} ${card.number}`;
     return `${card.color} ${card.type}`;
+  }
+
+  private cardEffectMessage(
+    playerName: string,
+    card: OneCardCard,
+    effect: OneCardEffect,
+  ) {
+    switch (card.type) {
+      case 'number':
+        return `🃏 ${playerName}님이 ${this.formatCard(card)}를 냈습니다.`;
+      case 'jump':
+        return `⏭️ ${playerName}님이 점프 카드를 냈습니다.`;
+      case 'reverse':
+        return `🔄 ${playerName}님이 리버스 카드를 냈습니다.`;
+      case 'plus1':
+        return `➕ ${playerName}님이 +1 카드를 냈습니다. 한 번 더 진행합니다.`;
+      case 'wild':
+        return `🌈 ${playerName}님이 색깔 바꾸기 카드를 냈습니다. 현재 색상: ${this.state.currentColor}`;
+      case 'attack2':
+      case 'attack3':
+        return `🔥 ${playerName}님이 ${this.formatCard(card)}를 사용했습니다. 누적 공격: ${this.state.pendingAttack}`;
+      case 'oz':
+        return `🔥🔥 ${playerName}님이 오즈를 사용했습니다. 누적 공격: ${this.state.pendingAttack}`;
+      case 'mihile':
+        return `🛡️ ${playerName}님이 미하일을 사용했습니다. 공격을 무효화합니다.`;
+      case 'hawkeye':
+        return `🎯 ${playerName}님이 호크아이를 사용했습니다. 자신을 제외한 모두가 ${effect.drawOtherCount}장씩 받습니다.`;
+      case 'ikart':
+        return `🫥 ${playerName}님이 이카르트를 사용했습니다.`;
+      default:
+        return `${playerName}님이 카드를 사용했습니다.`;
+    }
   }
 
   private transferHost() {
@@ -775,19 +691,80 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     const nextHost = Array.from(this.state.players.values())[0];
 
     if (!nextHost) {
-      this.state.hostPlayerId = '';
+      this.state.hostSessionId = '';
       return;
     }
 
     nextHost.isHost = true;
-    this.state.hostPlayerId = nextHost.playerId;
+    this.state.hostSessionId = nextHost.sessionId;
     this.broadcast('chat', {
       clientId: 'System',
       message: `${nextHost.nickname} 님이 새 방장이 되었습니다.`,
     });
   }
 
-  private readIdentity(value: unknown, fallback: string) {
-    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  private finalizeMigrationIfReady() {
+    if (
+      this.state.migrationReady ||
+      !isMigrationGroupReady(this.migrationSeats, this.clients.length)
+    ) {
+      return;
+    }
+
+    this.state.migrationReady = true;
+    this.broadcast('migration_ready');
+  }
+
+  private logRejectedRequest(code: string, event = 'onecard.request_rejected') {
+    logRoomEvent('warn', event, {
+      roomId: this.roomId,
+      gameId: MAPLE_ONE_CARD_GAME.id,
+      code,
+    });
+  }
+
+  private rejectRequest(client: Client, code: string, message: string) {
+    this.logRejectedRequest(code);
+    sendRoomError(client, code, message);
+  }
+
+  private getHand(player: OneCardPlayer): OneCardCard[] {
+    return this.hands.get(player.sessionId) ?? [];
+  }
+
+  private syncPrivateHand(player: OneCardPlayer) {
+    const hand = this.getHand(player);
+    player.handCount = hand.length;
+
+    const client = this.clients.find(
+      (candidate) => candidate.sessionId === player.sessionId,
+    );
+    if (!client) return;
+
+    client.send(ONECARD_MESSAGES.privateHand, {
+      cards: hand.map((card) => {
+        const playable =
+          this.state.gamePhase === 'playing' &&
+          this.state.currentTurnId === player.sessionId &&
+          canPlayCard({
+            card,
+            topCard: getTopCard(this.state),
+            currentColor: this.state.currentColor,
+            pendingAttack: this.state.pendingAttack,
+          });
+
+        return {
+          id: card.id,
+          color: card.color,
+          type: card.type,
+          number: card.number,
+          playable,
+        };
+      }),
+    });
+  }
+
+  private syncAllPrivateHands() {
+    this.state.players.forEach((player) => this.syncPrivateHand(player));
   }
 }
