@@ -381,7 +381,8 @@ export class YutnoriRoom extends Room<YutnoriState> {
 
       try {
         const newTable = await matchMaker.createRoom('table_room', {
-          roomName: '🔥 피 튀기는 리벤지 매치!',
+          roomName: '초능력 윷놀이 리매치',
+          gameType: 'yutnori',
         });
 
         this.broadcast('move_room', {

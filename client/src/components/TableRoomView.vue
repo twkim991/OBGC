@@ -4,7 +4,10 @@
       <div>
         <p class="eyebrow">WAITING TABLE</p>
         <h1>테이블 대기실</h1>
-        <p class="header-description">게임을 선택하고 함께할 사람들과 준비하세요.</p>
+        <p class="header-description">
+          <span class="current-game-badge">{{ gameLabel(selectedGame) }}</span>
+          함께할 사람들과 준비하세요. 방장은 시작 전까지 게임을 변경할 수 있습니다.
+        </p>
       </div>
       <button @click="leave" class="leave-btn">로비로 나가기</button>
     </div>
@@ -13,22 +16,37 @@
       <div class="host-heading">
         <span class="host-badge">방장</span>
         <div>
-          <h2>플레이할 게임을 선택하세요.</h2>
-          <p>시작하면 테이블의 모든 참여자가 게임방으로 이동합니다.</p>
+          <h2>{{ gameLabel(selectedGame) }} 테이블</h2>
+          <p>게임을 변경하면 참여자와 로비의 방 목록에 즉시 반영됩니다.</p>
         </div>
       </div>
       <div class="game-select">
-        <select v-model="selectedGame" aria-label="게임 선택">
-          <option value="yutnori">윷놀이</option>
-          <option value="onecard">원카드</option>
-        </select>
-        <button @click="startGame" class="start-btn">선택한 게임 시작</button>
+        <label class="game-change-field">
+          <span class="field-label">변경할 게임</span>
+          <select v-model="draftGame" aria-label="변경할 게임 선택">
+            <option value="yutnori">초능력 윷놀이</option>
+            <option value="onecard">메이플 원카드</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          class="change-btn"
+          :disabled="draftGame === selectedGame"
+          @click="changeGame"
+        >
+          게임 변경
+        </button>
+        <button type="button" class="start-btn" @click="startGame">
+          {{ gameLabel(selectedGame) }} 시작
+        </button>
       </div>
     </section>
 
     <section v-else class="guest-notice">
       <span class="guest-badge">참여자</span>
-      <p>방장이 게임을 선택하고 있습니다. 채팅하며 잠시 기다려주세요.</p>
+      <p>
+        현재 선택된 게임은 <strong>{{ gameLabel(selectedGame) }}</strong>입니다. 변경되면 채팅과 화면에 바로 반영됩니다.
+      </p>
     </section>
 
     <section class="chat-container" aria-labelledby="table-chat-title">
@@ -64,6 +82,8 @@ const emit = defineEmits(['leave-table', 'move-to-game']);
 
 const isHost = ref(false);
 const selectedGame = ref('yutnori');
+const draftGame = ref('yutnori');
+const playerCount = ref(0);
 const messages = ref([]);
 const inputMessage = ref('');
 const chatBox = ref(null);
@@ -81,6 +101,13 @@ const setupListeners = () => {
   connection.onStateChange((state) => {
     const me = state.players.get(connection.sessionId);
     if (me) isHost.value = me.isHost;
+
+    playerCount.value = state.players.size;
+    const nextGame = state.gameType || 'yutnori';
+    if (nextGame !== selectedGame.value) {
+      selectedGame.value = nextGame;
+      draftGame.value = nextGame;
+    }
   });
 
   // 채팅 수신
@@ -97,9 +124,28 @@ const setupListeners = () => {
 
 const startGame = () => {
   if (props.tableConnection && isHost.value) {
-    props.tableConnection.send('start_game', selectedGame.value);
+    props.tableConnection.send('start_game');
   }
 };
+
+const changeGame = () => {
+  if (!props.tableConnection || !isHost.value || draftGame.value === selectedGame.value) return;
+
+  if (
+    playerCount.value > 1 &&
+    !window.confirm(
+      `${playerCount.value}명이 현재 테이블에 있습니다. ${gameLabel(draftGame.value)}로 변경할까요?`
+    )
+  ) {
+    draftGame.value = selectedGame.value;
+    return;
+  }
+
+  props.tableConnection.send('change_game', draftGame.value);
+};
+
+const gameLabel = (gameType) =>
+  gameType === 'onecard' ? '메이플 원카드' : '초능력 윷놀이';
 
 const sendMessage = () => {
   if (!inputMessage.value.trim() || !props.tableConnection) return;
@@ -152,6 +198,20 @@ const scrollToBottom = async () => {
   margin-bottom: 0;
   color: var(--color-muted);
   font-size: 17px;
+}
+
+.current-game-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: #f2f9ff;
+  color: var(--color-focus);
+  font-size: 12px;
+  font-weight: 700;
+  vertical-align: middle;
 }
 
 .leave-btn {
@@ -216,8 +276,22 @@ const scrollToBottom = async () => {
 }
 
 .game-select {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
   gap: var(--space-2);
+}
+
+.game-change-field {
+  min-width: 0;
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 select {
@@ -247,6 +321,27 @@ select:focus {
   font-weight: 700;
 }
 
+.change-btn {
+  min-height: 46px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.change-btn:hover:not(:disabled) {
+  background: var(--color-surface-muted);
+}
+
+.change-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .start-btn:hover {
   background: var(--color-primary-hover);
 }
@@ -264,6 +359,10 @@ select:focus {
 .guest-notice p {
   margin: 0;
   color: var(--color-muted);
+}
+
+.guest-notice strong {
+  color: var(--color-ink);
 }
 
 .guest-badge {
@@ -407,7 +506,10 @@ button[type='submit']:hover {
     flex-direction: column;
   }
 
-  .game-select,
+  .game-select {
+    grid-template-columns: 1fr;
+  }
+
   .input-area {
     flex-direction: column;
   }

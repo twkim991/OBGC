@@ -185,7 +185,8 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
       try {
         const newTable = await matchMaker.createRoom('table_room', {
-          roomName: '🃏 메이플 원카드 리매치 대기실',
+          roomName: '메이플 원카드 리매치',
+          gameType: 'onecard',
         });
 
         this.broadcast('move_room', {
