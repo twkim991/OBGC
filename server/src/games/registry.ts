@@ -1,12 +1,14 @@
 import type { Server } from 'colyseus';
 import type { GameDefinition, PublicGameMetadata } from './types';
 import { MAPLE_ONE_CARD_DEFINITION } from './onecard/definition';
+import { RUMMIKUB_DEFINITION } from './rummikub/definition';
 import { YUTNORI_DEFINITION } from './yutnori/definition';
 
 // 새 게임은 룸 파일에서 정의를 내보낸 뒤 이 목록에 한 번만 연결합니다.
 export const GAME_DEFINITIONS = [
   YUTNORI_DEFINITION,
   MAPLE_ONE_CARD_DEFINITION,
+  RUMMIKUB_DEFINITION,
 ] as const;
 
 export type RegisteredGame = (typeof GAME_DEFINITIONS)[number];

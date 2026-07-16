@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
+import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
 import { YUTNORI_PROTOCOL } from './games/yutnori/protocol';
 
 const LOCAL_GAME_VIEWS = Object.freeze([
@@ -22,6 +23,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: 'var(--color-focus)',
     surface: '#f2f9ff',
     loadView: () => import('./games/onecard/View.vue'),
+  }),
+  Object.freeze({
+    id: 'rummikub',
+    label: '루미큐브',
+    shortLabel: 'RM',
+    protocolVersion: RUMMIKUB_PROTOCOL.version,
+    quickFilter: true,
+    accent: 'var(--color-success)',
+    surface: '#f1faf5',
+    loadView: () => import('./games/rummikub/View.vue'),
   }),
 ]);
 
