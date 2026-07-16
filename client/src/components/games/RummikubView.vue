@@ -35,7 +35,9 @@
           :tiles="visibleRack"
           :selected-ids="selectedTileIds"
           :board-tile-ids="publicBoardTileIds"
+          :sort-mode="rackSortMode"
           @toggle="toggleTile"
+          @sort-change="rackSortMode = $event"
         />
 
         <RummikubTurnControls
@@ -134,6 +136,7 @@ const messages = ref([]);
 const draft = ref(null);
 const draftHistory = ref([]);
 const selectedTileIds = ref([]);
+const rackSortMode = ref('color');
 const actionPending = ref(false);
 const draftTurnId = ref('');
 const draftSourceRackKey = ref('');
@@ -219,7 +222,10 @@ const sortTiles = (tiles) =>
   [...tiles].sort((first, second) => {
     if (first.isJoker !== second.isJoker) return first.isJoker ? 1 : -1;
     const colorDifference = (colorOrder[first.color] ?? 9) - (colorOrder[second.color] ?? 9);
-    return colorDifference || first.number - second.number || first.id.localeCompare(second.id);
+    const numberDifference = first.number - second.number;
+    return rackSortMode.value === 'number'
+      ? numberDifference || colorDifference || first.id.localeCompare(second.id)
+      : colorDifference || numberDifference || first.id.localeCompare(second.id);
   });
 
 const draftRackTiles = computed(() => {
