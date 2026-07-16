@@ -48,12 +48,11 @@ import * as Colyseus from 'colyseus.js';
 
 import LobbyView from './components/LobbyView.vue';
 import TableRoomView from './components/TableRoomView.vue';
+import { GAME_CATALOG } from './games';
 
-// 동적 컴포넌트 로딩 (게임이 추가될 때마다 여기에 등록)
-const games = {
-  yutnori: defineAsyncComponent(() => import('./components/games/YutnoriView.vue')),
-  onecard: defineAsyncComponent(() => import('./components/games/MapleOneCardView.vue')),
-};
+const games = Object.fromEntries(
+  GAME_CATALOG.map((game) => [game.id, defineAsyncComponent(game.loadView)])
+);
 
 const createPlayerId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

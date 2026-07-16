@@ -1,4 +1,4 @@
-import { Room, Client, matchMaker } from 'colyseus';
+import { Room, Client, matchMaker, updateLobby } from 'colyseus';
 import { Schema, MapSchema, type } from '@colyseus/schema';
 
 type GameType = 'yutnori' | 'onecard';
@@ -59,6 +59,7 @@ export class TableRoom extends Room<TableState> {
       try {
         await this.setMetadata({ roomName: this.state.roomName, gameType: nextGame });
         this.state.gameType = nextGame;
+        updateLobby(this);
 
         this.broadcast('chat', {
           clientId: 'System',

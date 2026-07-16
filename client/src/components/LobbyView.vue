@@ -21,8 +21,9 @@
         <label class="control-field game-field">
           <span class="field-label">게임</span>
           <select v-model="newRoomGame" aria-label="새 방 게임">
-            <option value="yutnori">초능력 윷놀이</option>
-            <option value="onecard">메이플 원카드</option>
+            <option v-for="game in GAME_CATALOG" :key="game.id" :value="game.id">
+              {{ game.label }}
+            </option>
           </select>
         </label>
         <label class="control-field title-field">
@@ -45,20 +46,12 @@
           <h2 id="room-list-title">현재 열려있는 테이블</h2>
         </div>
         <div class="room-toolbar">
-          <div class="room-filters" role="group" aria-label="게임별 방 필터">
-            <button
-              v-for="filter in roomFilters"
-              :key="filter.value"
-              class="filter-button"
-              :class="{ active: selectedFilter === filter.value }"
-              :aria-pressed="selectedFilter === filter.value"
-              type="button"
-              @click="selectedFilter = filter.value"
-            >
-              {{ filter.label }}
-            </button>
-          </div>
-          <span class="auto-refresh">실시간 자동 갱신</span>
+          <GameFilterPicker
+            v-model="selectedFilter"
+            :games="GAME_CATALOG"
+            :room-counts="roomCountByGame"
+          />
+          <span class="auto-refresh">새 방·게임 변경 자동 반영</span>
         </div>
       </div>
       <ul class="room-list">
@@ -68,7 +61,7 @@
         </li>
         <li v-for="room in filteredRooms" :key="room.roomId" class="room-item">
           <div class="room-main">
-            <span class="room-icon" :class="`game-${room.metadata?.gameType || 'unknown'}`" aria-hidden="true">
+            <span class="room-icon" :style="gameTone(room.metadata?.gameType)" aria-hidden="true">
               {{ gameShortLabel(room.metadata?.gameType) }}
             </span>
             <div class="room-copy">
@@ -98,21 +91,35 @@
 
 <script setup>
 import { computed, ref, onUnmounted, watch } from 'vue';
+import GameFilterPicker from './GameFilterPicker.vue';
+import {
+  DEFAULT_GAME_ID,
+  GAME_CATALOG,
+  gameLabel,
+  gameShortLabel,
+  gameTone,
+  isSupportedGame,
+} from '../games';
 
 const props = defineProps(['colyseusClient', 'playerIdentity']);
 const emit = defineEmits(['join-table']);
 
 const availableRooms = ref([]);
 const newRoomName = ref('');
-const newRoomGame = ref('yutnori');
+const newRoomGame = ref(DEFAULT_GAME_ID);
 const selectedFilter = ref('all');
 let lobbyConnection = null;
 
-const roomFilters = [
-  { value: 'all', label: '전체' },
-  { value: 'yutnori', label: '초능력 윷놀이' },
-  { value: 'onecard', label: '메이플 원카드' },
-];
+const roomCountByGame = computed(() => {
+  const counts = Object.fromEntries(GAME_CATALOG.map((game) => [game.id, 0]));
+
+  availableRooms.value.forEach((room) => {
+    const gameType = room.metadata?.gameType;
+    if (isSupportedGame(gameType)) counts[gameType] += 1;
+  });
+
+  return counts;
+});
 
 const filteredRooms = computed(() => {
   if (selectedFilter.value === 'all') return availableRooms.value;
@@ -130,18 +137,6 @@ const emptyRoomDescription = computed(() =>
     ? '첫 테이블을 만들어 친구를 초대해보세요.'
     : '다른 게임을 선택하거나 새 테이블을 만들어보세요.'
 );
-
-const gameLabel = (gameType) => {
-  if (gameType === 'onecard') return '메이플 원카드';
-  if (gameType === 'yutnori') return '초능력 윷놀이';
-  return '게임 미정';
-};
-
-const gameShortLabel = (gameType) => {
-  if (gameType === 'onecard') return 'OC';
-  if (gameType === 'yutnori') return '윷';
-  return '?';
-};
 
 // props.colyseusClient가 초기화된 후 로비 접속
 watch(
@@ -176,7 +171,7 @@ const createRoom = async () => {
   if (!newRoomName.value.trim()) {
     return alert('방 제목을 입력하세요!');
   }
-  if (!['yutnori', 'onecard'].includes(newRoomGame.value)) {
+  if (!isSupportedGame(newRoomGame.value)) {
     return alert('플레이할 게임을 선택하세요!');
   }
   if (!props.colyseusClient) return;
@@ -377,7 +372,7 @@ button:disabled {
 }
 
 .room-panel {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .room-panel-header {
@@ -387,6 +382,7 @@ button:disabled {
   gap: var(--space-4);
   padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
   background: var(--color-surface-muted);
 }
 
@@ -396,36 +392,6 @@ button:disabled {
   justify-content: flex-end;
   gap: var(--space-3);
   flex-wrap: wrap;
-}
-
-.room-filters {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-small);
-  background: var(--color-surface);
-}
-
-.filter-button {
-  min-height: 30px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--color-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.filter-button:hover:not(:disabled) {
-  background: var(--color-surface-muted);
-  color: var(--color-ink);
-}
-
-.filter-button.active {
-  background: var(--color-ink);
-  color: white;
 }
 
 .auto-refresh {
@@ -442,8 +408,10 @@ button:disabled {
 
 .room-list {
   list-style: none;
+  overflow: hidden;
   padding: 0;
   margin: 0;
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
 
 .room-item {
@@ -484,20 +452,10 @@ button:disabled {
   place-items: center;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
-  background: var(--color-surface-muted);
-  color: var(--color-ink-soft);
+  background: var(--game-surface);
+  color: var(--game-color);
   font-size: 12px;
   font-weight: 800;
-}
-
-.room-icon.game-onecard {
-  background: #f2f9ff;
-  color: var(--color-focus);
-}
-
-.room-icon.game-yutnori {
-  background: #fff8ef;
-  color: var(--color-warning);
 }
 
 .room-title-line {
@@ -573,6 +531,19 @@ button:disabled {
   font-size: 18px;
 }
 
+@media (max-width: 980px) {
+  .room-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .room-toolbar {
+    width: 100%;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+}
+
 @media (max-width: 760px) {
   .lobby-heading,
   .create-panel {
@@ -600,22 +571,6 @@ button:disabled {
 
   .create-button {
     grid-column: 1 / -1;
-  }
-
-  .room-panel-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .room-toolbar {
-    width: 100%;
-    align-items: flex-start;
-    justify-content: space-between;
-  }
-
-  .room-filters {
-    max-width: 100%;
-    overflow-x: auto;
   }
 
   .room-status {

@@ -24,8 +24,9 @@
         <label class="game-change-field">
           <span class="field-label">변경할 게임</span>
           <select v-model="draftGame" aria-label="변경할 게임 선택">
-            <option value="yutnori">초능력 윷놀이</option>
-            <option value="onecard">메이플 원카드</option>
+            <option v-for="game in GAME_CATALOG" :key="game.id" :value="game.id">
+              {{ game.label }}
+            </option>
           </select>
         </label>
         <button
@@ -75,14 +76,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
+import { DEFAULT_GAME_ID, GAME_CATALOG, gameLabel } from '../games';
 
 const props = defineProps(['tableConnection']);
 const emit = defineEmits(['leave-table', 'move-to-game']);
 
 const isHost = ref(false);
-const selectedGame = ref('yutnori');
-const draftGame = ref('yutnori');
+const selectedGame = ref(DEFAULT_GAME_ID);
+const draftGame = ref(DEFAULT_GAME_ID);
 const playerCount = ref(0);
 const messages = ref([]);
 const inputMessage = ref('');
@@ -103,7 +105,7 @@ const setupListeners = () => {
     if (me) isHost.value = me.isHost;
 
     playerCount.value = state.players.size;
-    const nextGame = state.gameType || 'yutnori';
+    const nextGame = state.gameType || DEFAULT_GAME_ID;
     if (nextGame !== selectedGame.value) {
       selectedGame.value = nextGame;
       draftGame.value = nextGame;
@@ -143,9 +145,6 @@ const changeGame = () => {
 
   props.tableConnection.send('change_game', draftGame.value);
 };
-
-const gameLabel = (gameType) =>
-  gameType === 'onecard' ? '메이플 원카드' : '초능력 윷놀이';
 
 const sendMessage = () => {
   if (!inputMessage.value.trim() || !props.tableConnection) return;
