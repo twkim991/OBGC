@@ -1,0 +1,12 @@
+{
+  "name": "obgc-cafe24-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "main": "web.js",
+  "scripts": {
+    "start": "node web.js"
+  },
+  "engines": {
+    "node": "14.x"
+  }
+}

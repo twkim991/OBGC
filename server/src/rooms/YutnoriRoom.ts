@@ -1,4 +1,4 @@
-import { Room, Client } from 'colyseus';
+import { Room, Client } from '@colyseus/core';
 import { createRematchTable } from '../games/rematch';
 import {
   readChatMessage,

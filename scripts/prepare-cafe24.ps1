@@ -1,8 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$DeployPath = 'C:\WORK\bis2203_obgc',
+  [string]$DeployPath = 'C:\WORK\bis2203_obgc_clean',
   [switch]$InstallSourceDependencies,
-  [switch]$SkipRuntimeDependencies,
   [switch]$AllowDirtySource
 )
 
@@ -114,8 +113,8 @@ if ($InstallSourceDependencies -or -not (Test-Path (Join-Path $ServerRoot 'node_
 Write-Host 'Building the Vue client...'
 Invoke-CheckedCommand 'npm.cmd' @('run', 'build') $ClientRoot
 
-Write-Host 'Building the NestJS server...'
-Invoke-CheckedCommand 'npm.cmd' @('run', 'build') $ServerRoot
+Write-Host 'Building the bundled NestJS server...'
+Invoke-CheckedCommand 'npm.cmd' @('run', 'build:cafe24') $ServerRoot
 
 $legacyClientPath = Assert-DeploymentChildPath (Join-Path $script:DeployRoot 'clinet-dist')
 if (Test-Path -LiteralPath $legacyClientPath) {
@@ -125,19 +124,55 @@ if (Test-Path -LiteralPath $legacyClientPath) {
 
 Write-Host 'Synchronizing build outputs...'
 Sync-BuildDirectory (Join-Path $ClientRoot 'dist') (Join-Path $script:DeployRoot 'client-dist')
-Sync-BuildDirectory (Join-Path $ServerRoot 'dist') (Join-Path $script:DeployRoot 'dist')
+Sync-BuildDirectory (Join-Path $ServerRoot 'cafe24-dist') (Join-Path $script:DeployRoot 'dist')
 
-foreach ($fileName in @('web.js', 'package.json', 'package-lock.json')) {
-  $sourceFile = Join-Path $ServerRoot $fileName
+$bundledEntry = Assert-DeploymentChildPath (Join-Path $script:DeployRoot 'dist\index.js')
+$deployEntry = Assert-DeploymentChildPath (Join-Path $script:DeployRoot 'dist\main.js')
+if (-not (Test-Path -LiteralPath $bundledEntry -PathType Leaf)) {
+  throw "Bundled server entry point was not found: $bundledEntry"
+}
+Move-Item -LiteralPath $bundledEntry -Destination $deployEntry -Force
+
+$webEntry = Join-Path $ServerRoot 'web.js'
+$runtimeManifest = Join-Path $ServerRoot 'package.cafe24.json'
+foreach ($sourceFile in @($webEntry, $runtimeManifest)) {
   if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
     throw "Required deployment file was not found: $sourceFile"
   }
-  Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $script:DeployRoot $fileName) -Force
+}
+Copy-Item -LiteralPath $webEntry -Destination (Join-Path $script:DeployRoot 'web.js') -Force
+Copy-Item -LiteralPath $runtimeManifest -Destination (Join-Path $script:DeployRoot 'package.json') -Force
+
+$obsoletePaths = @(
+  (Join-Path $script:DeployRoot 'node_modules'),
+  (Join-Path $script:DeployRoot 'package-lock.json'),
+  (Join-Path $script:DeployRoot '.npmrc')
+)
+foreach ($obsoletePath in $obsoletePaths) {
+  $safePath = Assert-DeploymentChildPath $obsoletePath
+  if (Test-Path -LiteralPath $safePath) {
+    Remove-Item -LiteralPath $safePath -Recurse -Force
+  }
 }
 
-if (-not $SkipRuntimeDependencies) {
-  Write-Host 'Installing production runtime dependencies...'
-  Invoke-CheckedCommand 'npm.cmd' @('ci', '--omit=dev') $script:DeployRoot
+$bundleText = [IO.File]::ReadAllText($deployEntry)
+foreach ($dependency in @(
+  '@nestjs/common',
+  '@nestjs/core',
+  '@nestjs/platform-express',
+  '@nestjs/serve-static',
+  '@colyseus/core',
+  '@colyseus/schema',
+  '@colyseus/ws-transport',
+  'reflect-metadata',
+  'rxjs'
+)) {
+  if (
+    $bundleText.Contains("require(`"$dependency`")") -or
+    $bundleText.Contains("require('$dependency')")
+  ) {
+    throw "Bundled server still has an external runtime dependency: $dependency"
+  }
 }
 
 $sourceCommit = (& git -C $ProjectRoot rev-parse HEAD).Trim()

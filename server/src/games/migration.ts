@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import { matchMaker } from 'colyseus';
+import { matchMaker } from '@colyseus/core';
 import { isRecord, readProtocolVersions, readString } from './protocol';
 
 export const MIGRATION_SEAT_SECONDS = 20;

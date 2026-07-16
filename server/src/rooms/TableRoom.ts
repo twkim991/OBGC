@@ -1,4 +1,4 @@
-import { Room, Client, updateLobby } from 'colyseus';
+import { Room, Client, updateLobby } from '@colyseus/core';
 import { Schema, MapSchema, type } from '@colyseus/schema';
 import { DEFAULT_GAME, getGame } from '../games/registry';
 import type { GameType } from '../games/registry';

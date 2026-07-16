@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { Server, LobbyRoom } from 'colyseus';
+import { Server, LobbyRoom } from '@colyseus/core';
+import { WebSocketTransport } from '@colyseus/ws-transport';
 import { TableRoom } from './rooms/TableRoom';
 import { registerGameRooms } from './games/registry';
 
@@ -9,7 +10,9 @@ async function bootstrap() {
   app.enableCors();
 
   const gameServer = new Server({
-    server: app.getHttpServer(),
+    transport: new WebSocketTransport({
+      server: app.getHttpServer(),
+    }),
   });
 
   gameServer.define('lobby', LobbyRoom);

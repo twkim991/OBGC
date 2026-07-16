@@ -1,4 +1,4 @@
-import type { Room } from 'colyseus';
+import type { Room } from '@colyseus/core';
 
 export type GameRoomClass = new (...args: any[]) => Room;
 

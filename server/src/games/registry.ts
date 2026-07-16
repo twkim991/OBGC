@@ -1,4 +1,4 @@
-import type { Server } from 'colyseus';
+import type { Server } from '@colyseus/core';
 import type { GameDefinition, PublicGameMetadata } from './types';
 import { MAPLE_ONE_CARD_DEFINITION } from './onecard/definition';
 import { RUMMIKUB_DEFINITION } from './rummikub/definition';

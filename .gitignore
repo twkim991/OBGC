@@ -27,6 +27,7 @@ lerna-debug.log*
 /dist
 /node_modules
 /server/dist
+/server/cafe24-dist
 /server/node_modules
 /server/client-dist
 
