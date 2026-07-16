@@ -143,7 +143,7 @@ export class RummikubRoom extends Room<RummikubState> {
         baseRevision: parsed.baseRevision,
       });
 
-      if (!result.ok) {
+      if (result.ok === false) {
         this.rejectRequest(client, result.code, COMMIT_ERROR_MESSAGES[result.code]);
         return;
       }
@@ -514,4 +514,3 @@ export class RummikubRoom extends Room<RummikubState> {
     });
   }
 }
-
