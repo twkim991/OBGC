@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
 import { DAVINCI_CODE_PROTOCOL } from './games/davinci-code/protocol';
+import { HALLI_GALLI_PROTOCOL } from './games/halli-galli/protocol';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
 import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
 import { YUTNORI_PROTOCOL } from './games/yutnori/protocol';
@@ -44,6 +45,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: 'var(--color-ink-soft)',
     surface: '#f6f5f4',
     loadView: () => import('./games/davinci-code/View.vue'),
+  }),
+  Object.freeze({
+    id: 'halli-galli',
+    label: '할리갈리',
+    shortLabel: 'HG',
+    protocolVersion: HALLI_GALLI_PROTOCOL.version,
+    quickFilter: false,
+    accent: '#dd7900',
+    surface: '#fff8ef',
+    loadView: () => import('./games/halli-galli/View.vue'),
   }),
 ]);
 

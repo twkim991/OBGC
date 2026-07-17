@@ -1,6 +1,7 @@
 import type { Server } from '@colyseus/core';
 import type { GameDefinition, PublicGameMetadata } from './types';
 import { DAVINCI_CODE_DEFINITION } from './davinci-code/definition';
+import { HALLI_GALLI_DEFINITION } from './halli-galli/definition';
 import { MAPLE_ONE_CARD_DEFINITION } from './onecard/definition';
 import { RUMMIKUB_DEFINITION } from './rummikub/definition';
 import { YUTNORI_DEFINITION } from './yutnori/definition';
@@ -11,6 +12,7 @@ export const GAME_DEFINITIONS = [
   MAPLE_ONE_CARD_DEFINITION,
   RUMMIKUB_DEFINITION,
   DAVINCI_CODE_DEFINITION,
+  HALLI_GALLI_DEFINITION,
 ] as const;
 
 export type RegisteredGame = (typeof GAME_DEFINITIONS)[number];
