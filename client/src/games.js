@@ -1,6 +1,7 @@
 import { reactive } from 'vue';
 import { DAVINCI_CODE_PROTOCOL } from './games/davinci-code/protocol';
 import { HALLI_GALLI_PROTOCOL } from './games/halli-galli/protocol';
+import { LOVE_LETTER_PROTOCOL } from './games/love-letter/protocol';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
 import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
 import { YUTNORI_PROTOCOL } from './games/yutnori/protocol';
@@ -55,6 +56,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: '#dd7900',
     surface: '#fff8ef',
     loadView: () => import('./games/halli-galli/View.vue'),
+  }),
+  Object.freeze({
+    id: 'love-letter',
+    label: '러브레터',
+    shortLabel: 'LL',
+    protocolVersion: LOVE_LETTER_PROTOCOL.version,
+    quickFilter: false,
+    accent: '#b4234e',
+    surface: '#fff5f7',
+    loadView: () => import('./games/love-letter/View.vue'),
   }),
 ]);
 
