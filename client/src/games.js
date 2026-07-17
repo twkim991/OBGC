@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { DAVINCI_CODE_PROTOCOL } from './games/davinci-code/protocol';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
 import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
 import { YUTNORI_PROTOCOL } from './games/yutnori/protocol';
@@ -33,6 +34,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: 'var(--color-success)',
     surface: '#f1faf5',
     loadView: () => import('./games/rummikub/View.vue'),
+  }),
+  Object.freeze({
+    id: 'davinci-code',
+    label: '다빈치 코드',
+    shortLabel: 'DC',
+    protocolVersion: DAVINCI_CODE_PROTOCOL.version,
+    quickFilter: true,
+    accent: 'var(--color-ink-soft)',
+    surface: '#f6f5f4',
+    loadView: () => import('./games/davinci-code/View.vue'),
   }),
 ]);
 

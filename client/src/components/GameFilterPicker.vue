@@ -120,7 +120,7 @@ const props = defineProps({
   },
   quickLimit: {
     type: Number,
-    default: 3,
+    default: 4,
   },
 });
 
