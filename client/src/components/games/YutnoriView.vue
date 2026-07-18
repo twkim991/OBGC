@@ -65,6 +65,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
+import { showActionAlert, showRoomErrorAlert } from '../../game-alerts';
 import GameChatPanel from './shared/GameChatPanel.vue';
 import YutBoard from './yutnori/YutBoard.vue';
 import YutResultModal from './yutnori/YutResultModal.vue';
@@ -166,7 +167,10 @@ const skillInfo = {
 
 const activateSkill = (skillId) => {
   if (!isMyTurn.value || gamePhase.value !== 'throwing') {
-    return alert('초능력은 내 턴의 윷 던지기 전에 사용할 수 있습니다.');
+    void showActionAlert('초능력은 내 차례의 윷 던지기 단계에서만 사용할 수 있습니다.', {
+      title: '지금은 초능력을 사용할 수 없어요',
+    });
+    return;
   }
   props.gameConnection?.send(YUTNORI_PROTOCOL.messages.activateSkill, skillId);
 };
@@ -220,6 +224,7 @@ function setupGame(connection) {
 
   connection.onMessage('room_error', (data) => {
     messages.value.push(toSystemErrorMessage(data));
+    void showRoomErrorAlert(data);
   });
 
   connection.onMessage('move_room', (data) => {

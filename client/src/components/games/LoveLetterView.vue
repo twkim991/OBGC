@@ -175,6 +175,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import { LOVE_LETTER_PROTOCOL } from '../../games/love-letter/protocol';
 import { projectLoveLetterState } from '../../games/love-letter/state';
 import ActionGuard from './shared/ActionGuard.vue';
@@ -216,7 +217,7 @@ watch(room, (nextRoom) => {
     actionPending.value = false;
   });
   nextRoom.onMessage(LOVE_LETTER_PROTOCOL.messages.privateReveal, (data) => { if (data?.card) privateReveal.value = data; });
-  nextRoom.onMessage('room_error', (data) => { errorMessage.value = data?.message || '요청을 처리하지 못했습니다.'; actionPending.value = false; });
+  nextRoom.onMessage('room_error', (data) => { errorMessage.value = ''; actionPending.value = false; void showRoomErrorAlert(data); });
   nextRoom.onMessage('move_room', (data) => emit('move-to-game', data));
   nextRoom.send(LOVE_LETTER_PROTOCOL.messages.requestPrivateState);
 }, { immediate:true });

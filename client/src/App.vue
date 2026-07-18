@@ -64,6 +64,8 @@
         <button type="button" @click="handleLeaveRoom">로비로 돌아가기</button>
       </section>
     </main>
+
+    <GameAlertHost />
   </div>
 </template>
 
@@ -73,8 +75,10 @@ import * as Colyseus from 'colyseus.js';
 
 import LobbyView from './components/LobbyView.vue';
 import TableRoomView from './components/TableRoomView.vue';
+import GameAlertHost from './components/GameAlertHost.vue';
 import GameLoadError from './components/games/shared/GameLoadError.vue';
 import GameLoading from './components/games/shared/GameLoading.vue';
+import { notifyGameAlert, openGameAlert, showConnectionAlert } from './game-alerts';
 import {
   CLIENT_PROTOCOL_VERSIONS,
   GAME_CATALOG,
@@ -211,12 +215,17 @@ const bindRoomLifecycle = (room) => {
       roomConnection.value = reconnectedRoom;
       bindRoomLifecycle(reconnectedRoom);
       migrationError.value = '';
+      notifyGameAlert('게임 연결을 복구했습니다.');
     } catch (error) {
       console.error('방 재연결 실패:', error);
       if (roomConnection.value === room) {
         roomConnection.value = null;
         currentView.value = 'lobby';
-        migrationError.value = '방 연결이 종료되어 로비로 이동했습니다.';
+        migrationError.value = '';
+        void showConnectionAlert('서버와의 연결을 복구하지 못해 로비로 이동했습니다.', {
+          note: '열려 있는 테이블에서 다시 입장할 수 있습니다.',
+          primaryLabel: '로비 확인',
+        });
       }
     }
   });
@@ -236,11 +245,18 @@ const handleLeaveRoom = () => {
   currentView.value = 'lobby';
 };
 
-const handleLeaveGame = () => {
-  const shouldLeave = window.confirm(
-    '현재 게임을 종료하고 모든 참가자와 함께 테이블 대기실로 돌아갈까요?',
-  );
-  if (shouldLeave) roomConnection.value?.send('return_to_table');
+const handleLeaveGame = async () => {
+  const result = await openGameAlert({
+    tone: 'danger',
+    label: '게임 나가기',
+    title: '모두 대기실로 돌아갈까요?',
+    message: '현재 게임을 종료하고 모든 참가자를 테이블 대기실로 이동합니다.',
+    note: '이번 턴에서 아직 확정하지 않은 선택은 저장되지 않을 수 있습니다.',
+    primaryLabel: '대기실로 나가기',
+    secondaryLabel: '계속 플레이',
+    destructive: true,
+  });
+  if (result === 'primary') roomConnection.value?.send('return_to_table');
 };
 
 // 🔥 강제 이주 신호를 받았을 때 (대기실 가기 & 게임하러 가기 둘 다 처리!)
@@ -286,8 +302,15 @@ const handleMoveToGame = async (data) => {
     if (!roomConnection.value || roomConnection.value === nextRoom) {
       roomConnection.value = previousRoom;
     }
-    migrationError.value =
+    const migrationMessage =
       error?.message || '새 방에 참가하지 못했습니다. 현재 방에서 다시 시도해주세요.';
+    migrationError.value = '';
+    void showConnectionAlert(migrationMessage, {
+      title: '게임 화면으로 이동하지 못했어요',
+      note: '현재 방 연결은 유지됩니다. 잠시 후 다시 시도해주세요.',
+      primaryLabel: '확인',
+      dismissible: true,
+    });
   } finally {
     pendingMigrationRoom = null;
     migrationInProgress = false;

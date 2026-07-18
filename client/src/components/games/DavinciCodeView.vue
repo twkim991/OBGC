@@ -164,6 +164,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import { toSystemErrorMessage } from '../../games/errors';
 import { DAVINCI_CODE_PROTOCOL } from '../../games/davinci-code/protocol';
 import { projectDavinciCodeState } from '../../games/davinci-code/state';
@@ -211,6 +212,7 @@ watch(
     nextRoom.onMessage('room_error', (data) => {
       actionPending.value = false;
       messages.value.push(toSystemErrorMessage(data));
+      void showRoomErrorAlert(data);
     });
     nextRoom.onMessage('move_room', (data) => emit('move-to-game', data));
     nextRoom.send(DAVINCI_CODE_PROTOCOL.messages.requestPrivateState);

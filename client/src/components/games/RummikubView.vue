@@ -106,6 +106,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import { toSystemErrorMessage } from '../../games/errors';
 import {
   analyzeClientMeld,
@@ -172,6 +173,7 @@ watch(
       actionPending.value = false;
       messages.value.push(toSystemErrorMessage(data));
       if (data?.code === 'STALE_BOARD_REVISION') resetDraft();
+      void showRoomErrorAlert(data);
     });
     nextRoom.onMessage('move_room', (data) => emit('move-to-game', data));
     nextRoom.send(RUMMIKUB_PROTOCOL.messages.requestPrivateState);

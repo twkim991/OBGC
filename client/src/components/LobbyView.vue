@@ -123,6 +123,7 @@
 
 <script setup>
 import { computed, nextTick, ref, onUnmounted, watch } from 'vue';
+import { showActionAlert, showConnectionAlert } from '../game-alerts';
 import GameFilterPicker from './GameFilterPicker.vue';
 import {
   DEFAULT_GAME_ID,
@@ -253,6 +254,12 @@ watch(
       } catch (e) {
         console.error('로비 접속 에러:', e);
         lobbyError.value = '실시간 방 목록에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.';
+        void showConnectionAlert(lobbyError.value, {
+          title: '실시간 테이블에 연결하지 못했어요',
+          note: '서버가 준비되면 페이지를 새로고침해 다시 연결할 수 있습니다.',
+          primaryLabel: '확인',
+          dismissible: true,
+        });
       }
     }
   },
@@ -267,6 +274,10 @@ const getPlayerIdentity = () => {
   const normalizedNickname = nickname.value.trim();
   if (!normalizedNickname) {
     lobbyError.value = '방을 만들거나 입장하려면 닉네임을 입력해주세요.';
+    void showActionAlert(lobbyError.value, {
+      title: '닉네임이 필요해요',
+      primaryLabel: '입력하기',
+    });
     return null;
   }
 
@@ -280,10 +291,18 @@ const getPlayerIdentity = () => {
 
 const createRoom = async () => {
   if (!newRoomName.value.trim()) {
-    return alert('방 제목을 입력하세요!');
+    await showActionAlert('새 테이블을 구분할 수 있도록 방 제목을 입력해주세요.', {
+      title: '방 제목이 필요해요',
+      primaryLabel: '입력하기',
+    });
+    return;
   }
   if (!isSupportedGame(newRoomGame.value)) {
-    return alert('플레이할 게임을 선택하세요!');
+    await showActionAlert('현재 이용할 수 있는 게임 중 하나를 선택해주세요.', {
+      title: '플레이할 게임을 선택해주세요',
+      primaryLabel: '게임 선택',
+    });
+    return;
   }
   if (!props.colyseusClient) return;
   const playerIdentity = getPlayerIdentity();
@@ -299,6 +318,11 @@ const createRoom = async () => {
   } catch (e) {
     console.error('방 생성 에러:', e);
     lobbyError.value = '방을 만들지 못했습니다. 입력 내용과 서버 연결을 확인해주세요.';
+    void showConnectionAlert(lobbyError.value, {
+      title: '새 테이블을 만들지 못했어요',
+      primaryLabel: '확인',
+      dismissible: true,
+    });
   }
 };
 
@@ -313,6 +337,11 @@ const joinRoom = async (roomId) => {
   } catch (e) {
     console.error('방 입장 에러:', e);
     lobbyError.value = '방에 입장하지 못했습니다. 방이 시작되었거나 인원이 가득 찼을 수 있습니다.';
+    void showConnectionAlert(lobbyError.value, {
+      title: '테이블에 입장하지 못했어요',
+      primaryLabel: '다른 테이블 보기',
+      dismissible: true,
+    });
   }
 };
 </script>

@@ -81,6 +81,7 @@
 
 <script setup>
 import { computed, ref, nextTick, watch } from 'vue';
+import { openGameAlert, showRoomErrorAlert } from '../game-alerts';
 import { DEFAULT_GAME_ID, GAME_CATALOG, gameLabel, getGame } from '../games';
 import { toSystemErrorMessage } from '../games/errors';
 
@@ -139,6 +140,7 @@ function setupListeners(connection) {
   connection.onMessage('room_error', (data) => {
     messages.value.push(toSystemErrorMessage(data));
     scrollToBottom();
+    void showRoomErrorAlert(data);
   });
 
   // 🔥 서버로부터 강제 이주 명령 수신 (App.vue로 이벤트 전달)
@@ -153,17 +155,23 @@ const startGame = () => {
   }
 }
 
-const changeGame = () => {
+const changeGame = async () => {
   if (!props.tableConnection || !isHost.value || draftGame.value === selectedGame.value) return;
 
-  if (
-    playerCount.value > 1 &&
-    !window.confirm(
-      `${playerCount.value}명이 현재 테이블에 있습니다. ${gameLabel(draftGame.value)}로 변경할까요?`
-    )
-  ) {
-    draftGame.value = selectedGame.value;
-    return;
+  if (playerCount.value > 1) {
+    const result = await openGameAlert({
+      tone: 'warning',
+      label: '게임 변경',
+      title: `${gameLabel(draftGame.value)}로 변경할까요?`,
+      message: `현재 테이블의 ${playerCount.value}명 모두에게 선택한 게임이 적용됩니다.`,
+      note: '게임을 시작하기 전에는 다시 다른 게임으로 변경할 수 있습니다.',
+      primaryLabel: '게임 변경',
+      secondaryLabel: '취소',
+    });
+    if (result !== 'primary') {
+      draftGame.value = selectedGame.value;
+      return;
+    }
   }
 
   props.tableConnection.send('change_game', draftGame.value);

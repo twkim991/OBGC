@@ -151,6 +151,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import { LOST_CITIES_PROTOCOL } from '../../games/lost-cities/protocol';
 import { LOST_CITIES_COLORS, projectLostCitiesState } from '../../games/lost-cities/state';
 import ActionGuard from './shared/ActionGuard.vue';
@@ -193,8 +194,9 @@ watch(room, (nextRoom) => {
     actionPending.value = false;
   });
   nextRoom.onMessage('room_error', (data) => {
-    errorMessage.value = data?.message || '요청을 처리하지 못했습니다.';
+    errorMessage.value = '';
     actionPending.value = false;
+    void showRoomErrorAlert(data);
   });
   nextRoom.onMessage('move_room', (data) => emit('move-to-game', data));
   nextRoom.send(LOST_CITIES_PROTOCOL.messages.requestPrivateState);

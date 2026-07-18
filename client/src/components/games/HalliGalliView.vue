@@ -101,6 +101,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import { toSystemErrorMessage } from '../../games/errors';
 import { HALLI_GALLI_PROTOCOL } from '../../games/halli-galli/protocol';
 import { projectHalliGalliState } from '../../games/halli-galli/state';
@@ -132,6 +133,7 @@ watch(room, (nextRoom) => {
   nextRoom.onMessage('room_error', (data) => {
     actionPending.value = false;
     messages.value.push(toSystemErrorMessage(data));
+    void showRoomErrorAlert(data);
   });
   nextRoom.onMessage('move_room', (data) => emit('move-to-game', data));
 }, { immediate: true });

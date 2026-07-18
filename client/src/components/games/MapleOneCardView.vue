@@ -101,6 +101,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { showRoomErrorAlert } from '../../game-alerts';
 import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
 import OneCardColorPicker from './onecard/OneCardColorPicker.vue';
@@ -153,6 +154,7 @@ watch(
 
     nextRoom.onMessage('room_error', (data) => {
       messages.value.push(toSystemErrorMessage(data));
+      void showRoomErrorAlert(data);
     });
 
     nextRoom.onMessage('move_room', (data) => {
