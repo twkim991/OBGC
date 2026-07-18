@@ -24,6 +24,7 @@ import { LOVE_LETTER_GAME } from './metadata';
 import {
   LOVE_LETTER_MESSAGES,
   parseChancellorPayload,
+  parseLoveLetterDrawPayload,
   parseLoveLetterPlayPayload,
 } from './protocol';
 import { LoveLetterPlayer, LoveLetterPublicCard, LoveLetterState } from './schema';
@@ -63,6 +64,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     this.onMessage(LOVE_LETTER_MESSAGES.requestPrivateState, (client) => this.syncPrivateHand(client.sessionId));
     this.onMessage('chat', (client, message) => this.handleChat(client, message));
     this.onMessage(LOVE_LETTER_MESSAGES.startGame, (client) => this.handleStartGame(client));
+    this.onMessage(LOVE_LETTER_MESSAGES.drawCard, (client, payload) => this.handleDrawCard(client, payload));
     this.onMessage(LOVE_LETTER_MESSAGES.playCard, (client, payload) => this.handlePlayCard(client, payload));
     this.onMessage(LOVE_LETTER_MESSAGES.resolveChancellor, (client, payload) => this.handleResolveChancellor(client, payload));
     this.onMessage(LOVE_LETTER_MESSAGES.nextRound, (client) => this.handleNextRound(client));
@@ -222,6 +224,25 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     if (!pending) this.completeTurn();
   }
 
+  private handleDrawCard(client: Client, payload: unknown) {
+    if (!this.canAct(client, 'draw')) return;
+    const parsed = parseLoveLetterDrawPayload(payload);
+    if (!parsed || parsed.turnRevision !== this.state.turnRevision) {
+      return this.rejectRequest(client, 'STALE_TURN', '카드를 뽑을 수 있는 턴 상태가 바뀌었습니다.');
+    }
+    const drawn = this.deck.pop();
+    if (!drawn) {
+      this.finishRound();
+      return;
+    }
+    this.hands.get(client.sessionId)?.push(drawn);
+    this.state.actionPhase = 'choose';
+    this.state.turnRevision += 1;
+    this.state.lastAction = `${this.playerName(client.sessionId)} 님이 카드를 뽑았습니다.`;
+    this.syncPublicCounts();
+    this.syncAllPrivateHands();
+  }
+
   private applyCardEffect(actorId: string, card: LoveLetterCard, targetId: string, guessed: LoveLetterCharacter | '') {
     const targetHand = this.hands.get(targetId) ?? [];
     const actorHand = this.hands.get(actorId) ?? [];
@@ -356,7 +377,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
       if (card) this.hands.get(player.sessionId)?.push(card);
     });
     this.state.gamePhase = 'playing';
-    this.state.actionPhase = 'choose';
+    this.state.actionPhase = 'draw';
     this.state.roundCount += 1;
     this.state.roundWinnerIds.clear();
     this.state.winnerSessionIds.clear();
@@ -382,9 +403,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
       return;
     }
     player.protected = false;
-    const drawn = this.deck.pop();
-    if (drawn) this.hands.get(player.sessionId)?.push(drawn);
-    this.state.actionPhase = 'choose';
+    this.state.actionPhase = 'draw';
     this.state.turnRevision += 1;
     this.syncPublicCounts();
     this.syncAllPrivateHands();

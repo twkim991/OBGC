@@ -1,6 +1,12 @@
-import { parseChancellorPayload, parseLoveLetterPlayPayload } from './protocol';
+import { parseChancellorPayload, parseLoveLetterDrawPayload, parseLoveLetterPlayPayload } from './protocol';
 
 describe('love letter protocol', () => {
+  it('parses a revision-guarded card draw', () => {
+    expect(parseLoveLetterDrawPayload({ turnRevision: 3 })).toEqual({ turnRevision: 3 });
+    expect(parseLoveLetterDrawPayload({ turnRevision: -1 })).toBeNull();
+    expect(parseLoveLetterDrawPayload({})).toBeNull();
+  });
+
   it('parses a guarded card play and rejects unknown guesses', () => {
     expect(parseLoveLetterPlayPayload({ cardId: 'guard-1', targetSessionId: 'b', guessedCharacter: 'princess', turnRevision: 3 })).toEqual({
       cardId: 'guard-1', targetSessionId: 'b', guessedCharacter: 'princess', turnRevision: 3,

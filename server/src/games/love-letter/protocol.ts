@@ -6,6 +6,7 @@ export const LOVE_LETTER_MESSAGES = {
   privateHand: 'private_hand',
   privateReveal: 'private_reveal',
   startGame: 'start_game',
+  drawCard: 'draw_card',
   playCard: 'play_card',
   resolveChancellor: 'resolve_chancellor',
   nextRound: 'next_round',
@@ -13,6 +14,12 @@ export const LOVE_LETTER_MESSAGES = {
 } as const;
 
 const characterSet = new Set<string>(LOVE_LETTER_CHARACTERS);
+
+export function parseLoveLetterDrawPayload(value: unknown): { turnRevision: number } | null {
+  if (!isRecord(value)) return null;
+  const turnRevision = readInteger(value.turnRevision, { min: 0 });
+  return turnRevision === null ? null : { turnRevision };
+}
 
 export function parseLoveLetterPlayPayload(value: unknown): {
   cardId: string;

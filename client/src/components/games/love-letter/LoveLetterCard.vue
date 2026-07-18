@@ -3,9 +3,10 @@
     v-if="interactive"
     type="button"
     class="role-card"
-    :class="[`role-${card?.character || 'back'}`, { selected, disabled }]"
+    :class="[`role-${card?.character || 'back'}`, { selected, disabled, compact }]"
     :disabled="disabled"
     :aria-pressed="selected"
+    :aria-label="label || undefined"
     @click="$emit('select', card)"
   >
     <CardContent :card="card" :compact="compact" />
@@ -24,6 +25,7 @@ defineProps({
   selected: Boolean,
   disabled: Boolean,
   compact: Boolean,
+  label: { type: String, default: '' },
 });
 defineEmits(['select']);
 
@@ -58,7 +60,7 @@ const CardContent = defineComponent({
 </script>
 
 <style scoped>
-.role-card { width: 156px; height: 218px; position: relative; display: block; padding: 0; overflow: hidden; border: 1px solid #d9d6d1; border-radius: 10px; background: #fff; color: #262421; box-shadow: 0 9px 26px rgba(35,31,27,.09); text-align: left; }
+.role-card { box-sizing: border-box; width: 156px; height: 218px; position: relative; display: block; padding: 0; overflow: hidden; border: 1px solid #d9d6d1; border-radius: 10px; background: #fff; color: #262421; box-shadow: 0 9px 26px rgba(35,31,27,.09); text-align: left; }
 button.role-card { cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
 button.role-card:hover:not(:disabled) { transform: translateY(-5px); border-color: #3568b8; box-shadow: 0 14px 32px rgba(35,31,27,.14); }
 .role-card.selected { transform: translateY(-8px); border: 2px solid #3568b8; box-shadow: 0 14px 30px rgba(53,104,184,.18); }

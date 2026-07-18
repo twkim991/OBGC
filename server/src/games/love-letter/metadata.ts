@@ -5,7 +5,7 @@ export const LOVE_LETTER_GAME = {
   label: '러브레터',
   minPlayers: 2,
   maxPlayers: 6,
-  protocolVersion: 1,
+  protocolVersion: 2,
   enabled: true,
   rematchTitle: '러브레터 리매치',
 } as const satisfies GameMetadata;

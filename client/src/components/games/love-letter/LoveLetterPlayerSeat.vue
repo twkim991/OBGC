@@ -5,7 +5,7 @@
       <strong>{{ player.nickname }} <i v-if="own">나</i></strong>
       <span v-if="player.eliminated">이번 라운드 탈락</span>
       <span v-else-if="player.protected">시녀의 보호를 받는 중</span>
-      <span v-else>{{ current ? '카드를 고르는 중' : `손패 ${player.handCount}장` }}</span>
+      <span v-else>{{ current ? currentActionCopy : `손패 ${player.handCount}장` }}</span>
     </div>
     <div class="favor" :aria-label="`${player.nickname} 호감 토큰 ${player.favorTokens || 0}개, 승리 목표 ${favorTarget}개`">
       <i v-for="index in favorTarget" :key="index" :class="{ filled: index <= (player.favorTokens || 0) }" aria-hidden="true">{{ index <= (player.favorTokens || 0) ? '♥' : '♡' }}</i>
@@ -14,7 +14,10 @@
 </template>
 
 <script setup>
-defineProps({ player: { type: Object, required: true }, current: Boolean, own: Boolean, favorTarget: { type: Number, default: 0 } });
+import { computed } from 'vue';
+
+const props = defineProps({ player: { type: Object, required: true }, current: Boolean, own: Boolean, favorTarget: { type: Number, default: 0 }, turnAction: { type: String, default: '' } });
+const currentActionCopy = computed(() => props.turnAction === 'draw' ? '카드를 뽑는 중' : props.turnAction === 'chancellor' ? '카드를 정리하는 중' : '카드를 고르는 중');
 </script>
 
 <style scoped>
