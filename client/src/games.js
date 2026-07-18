@@ -4,6 +4,7 @@ import { HALLI_GALLI_PROTOCOL } from './games/halli-galli/protocol';
 import { LOVE_LETTER_PROTOCOL } from './games/love-letter/protocol';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
 import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
+import { SPLENDOR_PROTOCOL } from './games/splendor/protocol';
 import { YUTNORI_PROTOCOL } from './games/yutnori/protocol';
 
 const LOCAL_GAME_VIEWS = Object.freeze([
@@ -66,6 +67,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: '#b4234e',
     surface: '#fff5f7',
     loadView: () => import('./games/love-letter/View.vue'),
+  }),
+  Object.freeze({
+    id: 'splendor',
+    label: '스플렌더',
+    shortLabel: 'SP',
+    protocolVersion: SPLENDOR_PROTOCOL.version,
+    quickFilter: false,
+    accent: '#0879d9',
+    surface: '#f2f8fd',
+    loadView: () => import('./games/splendor/View.vue'),
   }),
 ]);
 

@@ -1,0 +1,7 @@
+<template><div class="backdrop"><section class="result" role="dialog" aria-modal="true"><p>FINAL PRESTIGE</p><h2>{{ winnerNames }} 승리</h2><ol><li v-for="p in players" :key="p.sessionId"><strong>{{ p.rank }}위 · {{ p.nickname }}</strong><span>{{ p.prestige }}점 · 카드 {{ p.developmentCount }}</span></li></ol><button type="button" @click="$emit('return')">대기방으로 돌아가기</button></section></div></template>
+<script setup>
+import{computed}from'vue';const props=defineProps({players:{type:Array,required:true},winnerIds:{type:Array,required:true}});defineEmits(['return']);const winnerNames=computed(()=>props.winnerIds.map(id=>props.players.find(p=>p.sessionId===id)?.nickname||id).join(', '));
+</script>
+<style scoped>
+.backdrop{position:fixed;z-index:80;inset:0;display:grid;place-items:center;padding:20px;background:rgba(32,27,22,.48)}.result{width:min(440px,100%);padding:27px;border-radius:12px;background:#fff;box-shadow:0 24px 70px rgba(32,27,22,.2)}.result>p{margin:0;color:#8b8580;font-size:9px;font-weight:800;letter-spacing:.13em}.result h2{margin:6px 0 19px;font-size:28px}.result ol{display:grid;gap:1px;margin:0 0 20px;padding:0;list-style:none}.result li{display:flex;justify-content:space-between;gap:12px;padding:12px;background:#f6f5f4;font-size:12px}.result li span{color:#77716b}.result button{width:100%;min-height:46px;border:0;border-radius:5px;background:#0075de;color:#fff;font-weight:800;cursor:pointer}
+</style>
