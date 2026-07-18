@@ -7,14 +7,14 @@
       <span v-else-if="player.protected">시녀의 보호를 받는 중</span>
       <span v-else>{{ current ? '카드를 고르는 중' : `손패 ${player.handCount}장` }}</span>
     </div>
-    <div class="favor" :title="`호감 토큰 ${player.favorTokens}개`">
-      <i v-for="index in Math.max(player.favorTokens, 1)" :key="index" :class="{ empty: index > player.favorTokens }"></i>
+    <div class="favor" :aria-label="`${player.nickname} 호감 토큰 ${player.favorTokens || 0}개, 승리 목표 ${favorTarget}개`">
+      <i v-for="index in favorTarget" :key="index" :class="{ filled: index <= (player.favorTokens || 0) }" aria-hidden="true">{{ index <= (player.favorTokens || 0) ? '♥' : '♡' }}</i>
     </div>
   </section>
 </template>
 
 <script setup>
-defineProps({ player: { type: Object, required: true }, current: Boolean, own: Boolean });
+defineProps({ player: { type: Object, required: true }, current: Boolean, own: Boolean, favorTarget: { type: Number, default: 0 } });
 </script>
 
 <style scoped>
@@ -24,5 +24,5 @@ defineProps({ player: { type: Object, required: true }, current: Boolean, own: B
 .avatar { width:38px;height:38px;display:grid;place-items:center;border-radius:50%;background:#ece9e5;color:#625d58;font-weight:800; }
 .current .avatar { background:#3568b8;color:white; }.protected .avatar { background:#4b8a72;color:white; }
 .seat-copy strong,.seat-copy span { display:block; }.seat-copy strong{font-size:12px}.seat-copy strong i{font-style:normal;color:#3568b8;font-size:9px}.seat-copy span{margin-top:3px;color:#817b75;font-size:9px}
-.favor { max-width:42px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:2px }.favor i{width:8px;height:8px;border-radius:50%;background:#b4234e}.favor i.empty{background:#e4e1dd}
+.favor { display:flex;align-items:center;justify-content:flex-end;gap:2px;white-space:nowrap }.favor i{color:#aaa39e;font:normal 13px/1 Georgia,serif}.favor i.filled{color:#b44367}
 </style>
