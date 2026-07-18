@@ -54,18 +54,19 @@
           <OneCardPlayerPanel :players="players" :current-turn-id="state?.currentTurnId || ''" :my-session-id="mySessionId" />
         </section>
 
-        <OneCardHandPanel :cards="myHand" :is-my-turn="isMyTurn" @select="onClickCard" />
+        <OneCardHandPanel :cards="myHand" :is-my-turn="isMyTurn" :blocked-reason="cardBlockedReason" @select="onClickCard" />
 
         <section class="game-actions" aria-label="게임 동작">
-          <button
-            v-if="state?.gamePhase === 'waiting' && isHost"
-            class="button button-primary"
-            :disabled="players.length < 2"
-            type="button"
-            @click="startGame"
-          >
-            게임 시작
-          </button>
+          <ActionGuard v-if="state?.gamePhase === 'waiting' && isHost" :reason="startBlockedReason" label="게임 시작" block>
+            <button
+              class="button button-primary"
+              :disabled="Boolean(startBlockedReason)"
+              type="button"
+              @click="startGame"
+            >
+              게임 시작
+            </button>
+          </ActionGuard>
           <p v-else-if="state?.gamePhase === 'waiting'" class="action-note">
             방장이 게임을 시작할 때까지 기다려 주세요. 현재 {{ players.length }}명입니다.
           </p>
@@ -100,6 +101,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
 import OneCardColorPicker from './onecard/OneCardColorPicker.vue';
 import OneCardHandPanel from './onecard/OneCardHandPanel.vue';
@@ -184,6 +186,19 @@ const currentPlayerName = computed(() => {
   const player = players.value.find((item) => item.sessionId === state.value.currentTurnId);
   return player?.nickname || state.value.currentTurnId;
 });
+
+const startBlockedReason = computed(() => players.value.length < 2 ? '플레이어가 2명 이상 모여야 시작할 수 있습니다.' : '');
+
+function cardBlockedReason(card) {
+  if (showColorPicker.value) return '먼저 다음 진행 색상을 선택하세요.';
+  if (!isMyTurn.value) return `${currentPlayerName.value}님의 차례입니다. 지금은 카드를 낼 수 없습니다.`;
+  if (card.playable) return '';
+  if ((state.value?.pendingAttack || 0) > 0) {
+    if (topCard.value?.type === 'oz') return '오즈 공격은 미하일 또는 이카르트 카드로만 막을 수 있습니다.';
+    return `누적 공격 ${state.value.pendingAttack}장을 막으려면 동급 이상의 공격 카드나 방어 카드가 필요합니다.`;
+  }
+  return `현재 ${colorKoreanName(state.value?.currentColor)} 카드와 색상·숫자·특수 효과가 일치하지 않습니다.`;
+}
 
 const turnGuide = computed(() => {
   if (state.value?.gamePhase === 'waiting') {

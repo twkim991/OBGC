@@ -3,7 +3,7 @@
     <div class="meld-heading">
       <span>{{ valid ? `${analysis.kind === 'run' ? '런' : '그룹'} · ${analysis.score}점` : '미완성 조합' }}</span>
       <div v-if="editable" class="meld-actions">
-        <button type="button" :disabled="!hasSelection" @click="$emit('add-selected', meld.id)">선택 추가</button>
+        <ActionGuard :reason="hasSelection ? '' : '먼저 조합에 추가할 타일을 선택하세요.'" label="선택 추가"><button type="button" :disabled="!hasSelection" @click="$emit('add-selected', meld.id)">선택 추가</button></ActionGuard>
         <button type="button" @click="$emit('dissolve', meld.id)">해체</button>
       </div>
     </div>
@@ -16,8 +16,8 @@
           @toggle="$emit('toggle', $event)"
         />
         <div v-if="editable" class="order-buttons" aria-label="타일 순서 조정">
-          <button type="button" :disabled="index === 0" aria-label="왼쪽으로" @click="$emit('reorder', meld.id, tile.id, -1)">‹</button>
-          <button type="button" :disabled="index === meld.tiles.length - 1" aria-label="오른쪽으로" @click="$emit('reorder', meld.id, tile.id, 1)">›</button>
+          <ActionGuard :reason="index === 0 ? '이미 가장 왼쪽에 있는 타일입니다.' : ''" label="왼쪽으로"><button type="button" :disabled="index === 0" aria-label="왼쪽으로" @click="$emit('reorder', meld.id, tile.id, -1)">‹</button></ActionGuard>
+          <ActionGuard :reason="index === meld.tiles.length - 1 ? '이미 가장 오른쪽에 있는 타일입니다.' : ''" label="오른쪽으로"><button type="button" :disabled="index === meld.tiles.length - 1" aria-label="오른쪽으로" @click="$emit('reorder', meld.id, tile.id, 1)">›</button></ActionGuard>
         </div>
       </div>
     </div>
@@ -27,6 +27,7 @@
 <script setup>
 import { computed } from 'vue';
 import { analyzeClientMeld } from '../../../games/rummikub/draft';
+import ActionGuard from '../shared/ActionGuard.vue';
 import RummikubTile from './RummikubTile.vue';
 
 const props = defineProps({
@@ -55,4 +56,3 @@ const hasSelection = computed(() => props.selectedIds.length > 0);
 .order-buttons { display: flex; gap: 2px; }
 .order-buttons button { width: 19px; padding: 0; }
 </style>
-

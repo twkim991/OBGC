@@ -9,17 +9,22 @@
       <span>숨김 {{ player.hiddenCount }} · 공개 {{ Math.max(0, tiles.length - player.hiddenCount) }}</span>
     </header>
     <div v-if="tiles.length" class="code-rack">
-      <DavinciTile
+      <ActionGuard
         v-for="(tile, index) in tiles"
         :key="tile.id"
+        :reason="blockedReason(tile, index)"
+        :label="`${player.nickname}님의 ${index + 1}번째 타일`"
+      >
+      <DavinciTile
         :tile="tile"
         :own="own"
         :owner-name="player.nickname"
         :position="index"
-        :selectable="selectable && !tile.revealed"
+        :selectable="selectable && !tile.revealed && !blockedReason(tile, index)"
         :selected="selectedTileId === tile.id"
         @select="$emit('select', { playerId: player.sessionId, tileId: $event, index })"
       />
+      </ActionGuard>
     </div>
     <p v-else class="empty-code">
       {{ player.setupComplete ? '코드를 불러오는 중입니다.' : '시작 타일을 선택하고 있습니다.' }}
@@ -28,6 +33,7 @@
 </template>
 
 <script setup>
+import ActionGuard from '../shared/ActionGuard.vue';
 import DavinciTile from './DavinciTile.vue';
 
 defineProps({
@@ -36,6 +42,7 @@ defineProps({
   own: { type: Boolean, default: false },
   selectable: { type: Boolean, default: false },
   selectedTileId: { type: String, default: '' },
+  blockedReason: { type: Function, default: () => '' },
 });
 defineEmits(['select']);
 </script>

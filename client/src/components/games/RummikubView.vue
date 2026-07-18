@@ -51,6 +51,8 @@
           :can-undo="draftHistory.length > 0"
           :can-commit="canCommit"
           :pool-empty="(state?.poolCount ?? 0) === 0"
+          :editable-reason="editBlockedReason"
+          :commit-reason="commitBlockedReason"
           @new-meld="moveSelectedToNewMeld"
           @to-rack="moveSelectedToRack"
           @undo="undoDraft"
@@ -67,14 +69,15 @@
               현재 {{ connectedPlayerCount }}명 · 최소 2명 필요 · 시작 시 각자 타일 14개
             </span>
           </div>
-          <button
-            v-if="isHost"
-            type="button"
-            :disabled="connectedPlayerCount < 2"
-            @click="startGame"
-          >
-            게임 시작
-          </button>
+          <ActionGuard v-if="isHost" :reason="startBlockedReason" label="게임 시작" block>
+            <button
+              type="button"
+              :disabled="Boolean(startBlockedReason)"
+              @click="startGame"
+            >
+              게임 시작
+            </button>
+          </ActionGuard>
         </section>
       </main>
 
@@ -117,6 +120,7 @@ import {
 } from '../../games/rummikub/draft';
 import { RUMMIKUB_PROTOCOL } from '../../games/rummikub/protocol';
 import { projectRummikubState } from '../../games/rummikub/state';
+import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
 import RummikubBoard from './rummikub/RummikubBoard.vue';
 import RummikubPlayerPanel from './rummikub/RummikubPlayerPanel.vue';
@@ -282,6 +286,23 @@ const canCommit = computed(
     preservesBoardBeforeInitialMeld.value &&
     (myPlayer.value?.hasInitialMeld || initialMeldScore.value >= 30)
 );
+
+const startBlockedReason = computed(() => connectedPlayerCount.value < 2 ? '플레이어가 2명 이상 모여야 시작할 수 있습니다.' : '');
+const editBlockedReason = computed(() => {
+  if (!isMyTurn.value) return `${currentPlayerName.value}님의 차례입니다. 지금은 타일을 움직일 수 없습니다.`;
+  if (actionPending.value) return '이전 행동을 처리하고 있습니다. 잠시 기다려주세요.';
+  if (!draft.value) return '내 타일 정보를 불러오고 있습니다.';
+  return '';
+});
+const commitBlockedReason = computed(() => {
+  if (editBlockedReason.value) return editBlockedReason.value;
+  if (!hasRackTileOnBoard.value) return '내 패의 타일을 최소 한 개 이상 보드에 내려놓으세요.';
+  if (!preservesBoardBeforeInitialMeld.value) return '첫 등록 전에는 기존 보드의 조합을 변경할 수 없습니다.';
+  if (!allPublicBoardTilesPresent.value) return '보드에 있던 타일을 내 패에 남겨둘 수 없습니다.';
+  if (!allMeldsValid.value) return '미완성 조합이 있습니다. 모든 조합을 런이나 그룹으로 완성하세요.';
+  if (!myPlayer.value?.hasInitialMeld && initialMeldScore.value < 30) return `첫 등록 점수가 ${initialMeldScore.value}점입니다. 최소 30점이 필요합니다.`;
+  return canCommit.value ? '' : '현재 배치로는 턴을 확정할 수 없습니다.';
+});
 
 const turnGuide = computed(() => {
   if (state.value?.gamePhase === 'waiting') {

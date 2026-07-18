@@ -24,7 +24,7 @@
 
     <section v-if="state?.gamePhase === 'waiting'" class="waiting-panel">
       <div><strong>{{ isHost ? '편지를 전달할 준비가 됐나요?' : '방장이 게임을 시작할 때까지 기다려주세요.' }}</strong><span>현재 {{ connectedPlayerCount }}명 · 2~6명 플레이</span></div>
-      <button v-if="isHost" type="button" :disabled="connectedPlayerCount < 2" @click="startGame">게임 시작</button>
+      <ActionGuard v-if="isHost" :reason="startBlockedReason" label="게임 시작" block><button type="button" :disabled="Boolean(startBlockedReason)" @click="startGame">게임 시작</button></ActionGuard>
     </section>
 
     <template v-else>
@@ -45,13 +45,9 @@
 
             <div class="table-center">
               <div class="deck-area" :class="{ 'draw-ready': canDrawCard }">
-                <LoveLetterCard
-                  :card="null"
-                  :interactive="canDrawCard"
-                  :disabled="actionPending"
-                  label="덱에서 카드 한 장 뽑기"
-                  @select="drawCard"
-                />
+                <ActionGuard :reason="drawBlockedReason" label="덱에서 카드 한 장 뽑기">
+                  <LoveLetterCard :card="null" :interactive="canDrawCard" :disabled="actionPending" label="덱에서 카드 한 장 뽑기" @select="drawCard" />
+                </ActionGuard>
                 <strong>{{ state?.deckCount || 0 }}</strong><span>{{ canDrawCard ? '클릭해서 뽑기' : '남은 편지' }}</span>
               </div>
               <div class="live-reveal" aria-live="polite">
@@ -118,7 +114,7 @@
                 <li v-for="card in chancellorReturns" :key="card.id">{{ cardName(card.character) }}</li>
               </ol>
               <button v-if="chancellorReturns.length > 1" type="button" class="secondary" @click="reverseReturns">아래에 놓을 순서 뒤집기</button>
-              <button type="button" class="primary" :disabled="!chancellorKeepId || actionPending" @click="resolveChancellor">선택 확정</button>
+              <ActionGuard :reason="chancellorBlockedReason" label="재상 선택 확정" block><button type="button" class="primary" :disabled="Boolean(chancellorBlockedReason)" @click="resolveChancellor">선택 확정</button></ActionGuard>
             </div>
 
             <template v-else>
@@ -126,17 +122,17 @@
               <div v-if="canChooseCard" class="selection-summary">
                 <span>사용할 카드</span><strong>{{ selectedCard ? `${selectedCard.value} · ${cardName(selectedCard.character)}` : '손패에서 선택' }}</strong>
               </div>
-              <div v-if="selectedCard && targetedCharacters.has(selectedCard.character) && validTargets.length" class="target-list">
+              <div v-if="selectedCard && targetedCharacters.has(selectedCard.character)" class="target-list">
                 <span>대상 선택</span>
-                <button v-for="player in validTargets" :key="player.sessionId" type="button" :class="{ selected: targetId === player.sessionId }" @click="targetId = player.sessionId">
-                  {{ player.nickname }}<small v-if="player.sessionId === mySessionId">나</small>
-                </button>
+                <ActionGuard v-for="player in targetCandidates" :key="player.sessionId" :reason="targetBlockedReason(player)" :label="`${player.nickname} 대상 선택`" block>
+                  <button type="button" :disabled="Boolean(targetBlockedReason(player))" :class="{ selected: targetId === player.sessionId }" @click="targetId = player.sessionId">{{ player.nickname }}<small v-if="player.sessionId === mySessionId">나</small></button>
+                </ActionGuard>
               </div>
               <label v-if="selectedCard?.character === 'guard' && validTargets.length" class="guess-field">
                 추측할 인물
                 <select v-model="guessedCharacter"><option value="">인물 선택</option><option v-for="role in guardGuessRoles" :key="role.id" :value="role.id">{{ role.value }} · {{ role.name }}</option></select>
               </label>
-              <button v-if="canChooseCard" type="button" class="primary play-button" :disabled="!canSubmitPlay || actionPending" @click="playCard">이 카드 사용</button>
+              <ActionGuard v-if="canChooseCard" :reason="playBlockedReason" label="이 카드 사용" block><button type="button" class="primary play-button" :disabled="Boolean(playBlockedReason)" @click="playCard">이 카드 사용</button></ActionGuard>
             </template>
           </section>
         </aside>
@@ -145,15 +141,20 @@
       <section class="hand-panel" aria-labelledby="my-hand-title">
         <div class="panel-heading"><div><h2 id="my-hand-title">내 손패</h2><span>나에게만 보이는 카드</span></div><small v-if="countessRequired">왕·왕자와 함께 있어 백작부인을 반드시 사용해야 합니다.</small></div>
         <div class="hand-cards" :class="{ 'play-ready': canChooseCard }">
-          <LoveLetterCard
+          <ActionGuard
             v-for="card in privateHand.cards"
             :key="card.id"
+            :reason="handCardBlockedReason(card)"
+            :label="`${cardName(card.character)} 카드`"
+          >
+          <LoveLetterCard
             :card="card"
             :interactive="canChooseCard"
             :selected="selectedCardId === card.id"
-            :disabled="countessRequired && card.character !== 'countess'"
+            :disabled="Boolean(handCardBlockedReason(card))"
             @select="selectCard"
           />
+          </ActionGuard>
           <p v-if="!privateHand.cards.length" class="empty-hand">{{ myPlayer?.eliminated ? '이번 라운드에서 탈락했습니다.' : '비공개 손패를 불러오는 중입니다.' }}</p>
         </div>
       </section>
@@ -176,6 +177,7 @@
 import { computed, ref, watch } from 'vue';
 import { LOVE_LETTER_PROTOCOL } from '../../games/love-letter/protocol';
 import { projectLoveLetterState } from '../../games/love-letter/state';
+import ActionGuard from './shared/ActionGuard.vue';
 import LoveLetterCard from './love-letter/LoveLetterCard.vue';
 import LoveLetterPlayerSeat from './love-letter/LoveLetterPlayerSeat.vue';
 import LoveLetterResultModal from './love-letter/LoveLetterResultModal.vue';
@@ -236,6 +238,7 @@ const validTargets = computed(() => {
     player.sessionId !== mySessionId.value && !player.protected
   ));
 });
+const targetCandidates = computed(() => players.value.filter((player) => player.connected));
 const guardGuessRoles = computed(() => roles.filter((role) => role.id !== 'guard'));
 const canSubmitPlay = computed(() => {
   if (!canChooseCard.value || !selectedCard.value) return false;
@@ -244,6 +247,46 @@ const canSubmitPlay = computed(() => {
   if (selectedCard.value.character === 'guard' && validTargets.value.length && !guessedCharacter.value) return false;
   return true;
 });
+const startBlockedReason = computed(() => connectedPlayerCount.value < 2 ? '플레이어가 2명 이상 모여야 시작할 수 있습니다.' : '');
+const drawBlockedReason = computed(() => {
+  if (actionPending.value) return '카드를 뽑는 중입니다. 잠시 기다려주세요.';
+  if (state.value?.gamePhase !== 'playing') return '새 라운드가 시작된 뒤 카드를 뽑을 수 있습니다.';
+  if (myPlayer.value?.eliminated) return '이번 라운드에서 탈락하여 카드를 뽑을 수 없습니다.';
+  if (!isMyTurn.value) return `${playerName(state.value?.currentTurnId)}님의 차례입니다.`;
+  if (state.value?.actionPhase !== 'draw') return '지금은 손패에서 카드를 사용하는 단계입니다.';
+  if (!(state.value?.deckCount || 0)) return '덱에 남은 카드가 없습니다.';
+  return '';
+});
+const playBlockedReason = computed(() => {
+  if (actionPending.value) return '선택한 카드의 효과를 처리하고 있습니다.';
+  if (!selectedCard.value) return '먼저 손패에서 사용할 카드 한 장을 선택하세요.';
+  if (countessRequired.value && selectedCard.value.character !== 'countess') return '왕 또는 왕자와 함께 있으므로 백작부인을 반드시 사용해야 합니다.';
+  if (targetedCharacters.has(selectedCard.value.character) && validTargets.value.length && !targetId.value) return '카드 효과를 적용할 대상을 선택하세요.';
+  if (selectedCard.value.character === 'guard' && validTargets.value.length && !guessedCharacter.value) return '경비병으로 추측할 인물을 선택하세요.';
+  return '';
+});
+const chancellorBlockedReason = computed(() => {
+  if (actionPending.value) return '재상 카드 선택을 처리하고 있습니다.';
+  return chancellorKeepId.value ? '' : '손에 남길 카드 한 장을 선택하세요.';
+});
+
+function handCardBlockedReason(card) {
+  if (actionPending.value) return '이전 행동을 처리하고 있습니다. 잠시 기다려주세요.';
+  if (myPlayer.value?.eliminated) return '이번 라운드에서 탈락하여 카드를 사용할 수 없습니다.';
+  if (!isMyTurn.value) return `${playerName(state.value?.currentTurnId)}님의 차례입니다.`;
+  if (state.value?.actionPhase === 'draw') return '먼저 덱에서 카드 한 장을 뽑으세요.';
+  if (state.value?.actionPhase === 'chancellor') return '재상 행동 패널에서 손에 남길 카드를 선택하세요.';
+  if (countessRequired.value && card.character !== 'countess') return '왕 또는 왕자와 함께 있으므로 백작부인을 반드시 사용해야 합니다.';
+  return '';
+}
+
+function targetBlockedReason(player) {
+  if (player.eliminated) return '이번 라운드에서 탈락한 플레이어는 대상으로 선택할 수 없습니다.';
+  if (!selectedCard.value) return '먼저 사용할 카드를 선택하세요.';
+  if (player.sessionId === mySessionId.value && selectedCard.value.character !== 'prince') return '이 카드의 효과는 자신에게 사용할 수 없습니다.';
+  if (player.sessionId !== mySessionId.value && player.protected) return '시녀의 보호를 받고 있어 대상으로 선택할 수 없습니다.';
+  return '';
+}
 const chancellorReturns = computed(() => chancellorReturnIds.value.map((id) => privateHand.value.cards.find((card) => card.id === id)).filter((card) => card && card.id !== chancellorKeepId.value));
 const roundWinnerNames = computed(() => (state.value?.roundWinnerIds || []).map(playerName).join(', '));
 const roundRewardCopy = computed(() => {
@@ -298,7 +341,7 @@ function returnToTable() { room.value?.send(LOVE_LETTER_PROTOCOL.messages.return
 <style scoped>
 .love-game{display:grid;gap:16px;color:#292725}.game-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.eyebrow{margin:0 0 5px;color:#8c8580;font-size:9px;font-weight:800;letter-spacing:.14em}.game-topbar h1{margin:0;font-size:32px;letter-spacing:-.04em}.game-topbar>div>p:last-child{margin:5px 0 0;color:#77716c;font-size:12px}.turn-chip{width:min(360px,100%);min-width:300px;padding:11px 14px;border:1px solid #dedbd7;border-radius:7px;background:#fff}.turn-chip span,.turn-chip strong,.turn-chip small{display:block}.turn-chip span{color:#88817b;font-size:9px}.turn-chip strong{margin-top:3px;font-size:13px}.turn-chip small{margin-top:4px;color:#77716c;font-size:10px;line-height:1.4}.turn-chip.mine{border-color:#3568b8;background:#f3f7fd}.status-strip{display:grid;grid-template-columns:repeat(var(--player-count),minmax(0,1fr));gap:1px;overflow:hidden;border:1px solid #dfdcd8;border-radius:8px;background:#e9e6e2}.status-strip>div{min-width:0;padding:11px 14px;background:#fff}.status-strip>div.mine{background:#f3f7fd}.status-strip span{display:block;overflow:hidden;color:#8a847f;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.favor-hearts{display:flex;align-items:center;gap:3px;min-height:17px;margin-top:3px}.favor-hearts i{color:#aaa39e;font:normal 16px/1 Georgia,serif}.favor-hearts i.filled{color:#b44367}.error-banner{margin:0;padding:10px 12px;border:1px solid #ecc8c8;border-radius:6px;background:#fff5f5;color:#a52d2d;font-size:11px}.waiting-panel{display:flex;align-items:center;justify-content:space-between;padding:24px;border:1px solid #dedbd7;border-radius:10px;background:white}.waiting-panel strong,.waiting-panel span{display:block}.waiting-panel span{margin-top:5px;color:#817b75;font-size:11px}.waiting-panel button,.primary,.round-result button{min-height:42px;padding:0 17px;border:0;border-radius:6px;background:#3568b8;color:white;font-weight:800;cursor:pointer}.play-grid{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:16px}.table-panel,.side-panel,.hand-panel{border:1px solid #dedbd7;border-radius:10px;background:#fff}.table-panel,.side-panel{padding:14px}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-heading h2{margin:0;font-size:13px}.panel-heading span,.panel-heading small{color:#89827c;font-size:9px}.table-stage{min-height:540px;position:relative;display:grid;grid-template-rows:auto 1fr auto;gap:18px;padding:18px;margin-top:12px;border:1px solid #e6e2de;border-radius:8px;background:radial-gradient(circle at center,#faf9f7 0,#f4f1ed 72%)}.seat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.table-center{display:flex;align-items:center;justify-content:center;gap:24px}.deck-area{position:relative;text-align:center}.deck-area.draw-ready :deep(.role-card){border-color:#3568b8;box-shadow:0 0 0 3px rgba(53,104,184,.18),0 8px 22px rgba(53,104,184,.22)}.deck-area.draw-ready :deep(button.role-card:not(:disabled)){animation:love-deck-invite 2.6s ease-in-out infinite}.deck-area.draw-ready :deep(button.role-card:hover){animation:none}.deck-area.draw-ready>span{color:#3568b8;font-weight:800}.deck-area>strong{position:absolute;z-index:2;right:-9px;top:-9px;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#3568b8;color:white;font-size:11px}.deck-area>span{display:block;margin-top:5px;color:#85807a;font-size:9px}.live-reveal{min-width:300px;display:flex;align-items:center;justify-content:center;gap:24px}.live-reveal>div>span,.live-reveal>div>strong,.live-reveal>div>small{display:block}.live-reveal>div>span{color:#8a847e;font-size:8px;text-transform:uppercase;letter-spacing:.08em}.live-reveal>div>strong{margin-top:4px;font-size:12px}.live-reveal>div>small{margin-top:4px;color:#6f6964;font-size:9px}.effect-discard{display:grid;gap:4px;padding-left:12px;border-left:1px solid #dcd8d3}.reveal-placeholder{padding:28px;border:1px dashed #cfcac5;border-radius:8px;color:#8a847e;font-size:10px}.draw-instruction{min-width:260px;border-color:#a9bee0;background:#f5f8fd;text-align:left}.live-reveal .draw-instruction>strong{margin:0;color:#28558f;font-size:13px}.live-reveal .draw-instruction>span{margin-top:5px;color:#6f7782;font-size:10px;letter-spacing:0;text-transform:none}.removed-cards{position:absolute;right:12px;bottom:12px}.removed-cards>span{display:block;margin-bottom:5px;color:#8a847e;font-size:8px;text-align:right}.removed-cards>div{display:flex}.removed-cards .role-card+ .role-card{margin-left:-60px}.side-stack{display:grid;align-content:start;gap:12px}.phase-copy,.selection-summary{margin-top:12px;padding:12px;border-radius:6px;background:#f5f3f1}.phase-copy strong,.phase-copy span,.selection-summary span,.selection-summary strong{display:block}.phase-copy strong{font-size:12px}.phase-copy span,.selection-summary span{margin-top:4px;color:#7e7872;font-size:10px}.selection-summary strong{margin-top:4px;font-size:12px}.target-list{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px}.target-list>span{grid-column:1/-1;color:#817b75;font-size:9px}.target-list button,.mini-choice button{min-height:36px;border:1px solid #dcd8d4;border-radius:5px;background:white;font-size:10px;cursor:pointer}.target-list button.selected,.mini-choice button.selected{border-color:#3568b8;background:#f0f5fc;color:#28558f}.target-list small{margin-left:4px;color:#3568b8}.guess-field{display:grid;gap:5px;margin-top:12px;color:#817b75;font-size:9px}.guess-field select{min-height:40px;padding:0 9px;border:1px solid #d8d4d0;border-radius:5px;background:white}.play-button{width:100%;margin-top:12px}.primary:disabled,.waiting-panel button:disabled{opacity:.45;cursor:not-allowed}.round-result{display:grid;gap:7px;padding:16px;margin-top:12px;border-radius:7px;background:#f7f2f4}.round-result p{margin:0;color:#9b516d;font-size:9px;font-weight:800;letter-spacing:.1em}.round-result strong{font-size:15px}.round-result span,.round-result small{color:#79736d;font-size:10px}.round-result button{margin-top:8px}.chancellor-form{display:grid;gap:8px;margin-top:12px}.chancellor-form>strong{font-size:12px}.chancellor-form>span{color:#79736d;font-size:9px}.mini-choice{display:grid;gap:5px}.chancellor-form ol{margin:0;padding:9px 9px 9px 28px;background:#f5f3f1;color:#69635d;font-size:10px}.secondary{min-height:36px;border:1px solid #d9d5d1;border-radius:5px;background:white;color:#5d5853;font-weight:700;cursor:pointer}.role-reference{display:grid;margin-top:10px}.role-reference>div{display:grid;grid-template-columns:24px 1fr auto;align-items:center;min-height:29px;border-bottom:1px solid #eeeae6;font-size:10px}.role-reference b{color:#9b516d;font:800 11px/1 ui-monospace,monospace}.role-reference span{color:#8c8580}.reference-panel>p{margin:12px 0 0;color:#766f69;font-size:9px;line-height:1.55}.hand-panel{padding:14px}.hand-panel>.panel-heading>div span{display:block;margin-top:3px}.hand-panel>.panel-heading>small{max-width:360px;color:#a3475f;text-align:right}.hand-cards{min-height:238px;display:flex;align-items:flex-end;justify-content:center;gap:13px;padding:12px 0 0}.empty-hand{color:#817b75;font-size:11px}.reveal-backdrop{position:fixed;z-index:70;inset:0;display:grid;place-items:center;padding:20px;background:rgba(32,27,22,.48)}.private-reveal{width:min(390px,100%);display:grid;justify-items:center;gap:12px;padding:25px;border-radius:11px;background:white}.private-reveal>p{justify-self:start;margin:0;color:#8b8580;font-size:9px;font-weight:800;letter-spacing:.12em}.private-reveal h2{justify-self:start;margin:-7px 0 3px;font-size:20px}.private-reveal>span{color:#77716b;font-size:10px;text-align:center}.private-reveal>button{width:100%;min-height:42px;border:0;border-radius:6px;background:#3568b8;color:white;font-weight:800;cursor:pointer}
 @keyframes love-deck-invite{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-.hand-cards.play-ready :deep(button.role-card){animation:love-hand-invite 2.6s ease-in-out infinite}.hand-cards.play-ready :deep(button.role-card:hover){animation:none}
+.hand-cards :deep(.action-guard){flex:0 0 156px}.target-list :deep(.action-guard){width:100%}.hand-cards.play-ready :deep(button.role-card){animation:love-hand-invite 2.6s ease-in-out infinite}.hand-cards.play-ready :deep(button.role-card:hover){animation:none}
 @keyframes love-hand-invite{0%,100%{translate:0 0}50%{translate:0 -5px}}
 @media(prefers-reduced-motion:reduce){.deck-area.draw-ready :deep(button.role-card:not(:disabled)),.hand-cards.play-ready :deep(button.role-card){animation:none}}
 @media(max-width:1080px){.play-grid{grid-template-columns:1fr}.side-stack{grid-template-columns:1fr 1fr}.table-stage{min-height:500px}}@media(max-width:720px){.game-topbar{align-items:flex-start;flex-direction:column}.turn-chip{width:100%;min-width:0}.status-strip{grid-template-columns:1fr 1fr}.play-grid{display:block}.side-stack{grid-template-columns:1fr;margin-top:12px}.table-center{flex-direction:column}.live-reveal{min-width:0;flex-wrap:wrap}.removed-cards{position:static}.table-stage{min-height:650px}.hand-cards{overflow-x:auto;justify-content:flex-start}.waiting-panel{align-items:flex-start;flex-direction:column;gap:15px}.waiting-panel button{width:100%}}@media(max-width:480px){.seat-grid{grid-template-columns:1fr}.status-strip>div{padding:9px}.table-panel,.side-panel,.hand-panel{padding:11px}.live-reveal{gap:8px}}

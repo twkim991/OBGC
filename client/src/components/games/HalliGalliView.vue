@@ -25,7 +25,7 @@
         <strong>{{ isHost ? '과일 카드를 나눌 준비가 됐나요?' : '방장이 게임을 시작할 때까지 기다려주세요.' }}</strong>
         <span>현재 {{ connectedPlayerCount }}명 · 2~6명 플레이</span>
       </div>
-      <button v-if="isHost" type="button" :disabled="connectedPlayerCount < 2" @click="startGame">게임 시작</button>
+      <ActionGuard v-if="isHost" :reason="startBlockedReason" label="게임 시작" block><button type="button" :disabled="Boolean(startBlockedReason)" @click="startGame">게임 시작</button></ActionGuard>
     </section>
 
     <section v-else class="play-grid">
@@ -54,6 +54,7 @@
           <HalliGalliBell
             :ready="Boolean(state?.exactFiveFruit)"
             :disabled="!canRing"
+            :blocked-reason="bellBlockedReason"
             :result="bellResult"
             :hint="bellHint"
             @ring="ringBell"
@@ -87,7 +88,7 @@
             <strong>{{ actionCopy.title }}</strong>
             <span>{{ actionCopy.description }}</span>
           </div>
-          <button type="button" class="reveal-button" :disabled="!canFlip || actionPending" @click="flipCard">카드 공개</button>
+          <ActionGuard :reason="flipBlockedReason" label="카드 공개" block><button type="button" class="reveal-button" :disabled="Boolean(flipBlockedReason)" @click="flipCard">카드 공개</button></ActionGuard>
         </section>
 
         <GameActivityPanel :messages="messages" title="게임 기록" title-id="halli-activity-title" />
@@ -103,6 +104,7 @@ import { computed, ref, watch } from 'vue';
 import { toSystemErrorMessage } from '../../games/errors';
 import { HALLI_GALLI_PROTOCOL } from '../../games/halli-galli/protocol';
 import { projectHalliGalliState } from '../../games/halli-galli/state';
+import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
 import HalliGalliBell from './halli-galli/HalliGalliBell.vue';
 import HalliGalliCard from './halli-galli/HalliGalliCard.vue';
@@ -144,6 +146,22 @@ const canFlip = computed(() => isMyTurn.value && !myPlayer.value?.eliminated && 
 const canRing = computed(() => state.value?.gamePhase === 'playing' && !state.value?.bellLocked && !myPlayer.value?.eliminated && !actionPending.value);
 const currentPlayer = computed(() => players.value.find((player) => player.sessionId === state.value?.currentTurnId));
 const totalFaceUpCount = computed(() => players.value.reduce((sum, player) => sum + (player.faceUpCount || 0), 0));
+const startBlockedReason = computed(() => connectedPlayerCount.value < 2 ? '플레이어가 2명 이상 모여야 시작할 수 있습니다.' : '');
+const flipBlockedReason = computed(() => {
+  if (state.value?.gamePhase !== 'playing') return '게임이 진행 중일 때만 카드를 공개할 수 있습니다.';
+  if (myPlayer.value?.eliminated) return '이번 게임에서 탈락하여 카드를 공개할 수 없습니다.';
+  if (!isMyTurn.value) return `${currentPlayer.value?.nickname || '다른 플레이어'}님의 카드 공개 차례입니다.`;
+  if (!(myPlayer.value?.deckCount || 0)) return '공개할 카드가 남아 있지 않습니다.';
+  if (actionPending.value) return '직전 행동을 처리하고 있습니다. 잠시 기다려주세요.';
+  return '';
+});
+const bellBlockedReason = computed(() => {
+  if (state.value?.gamePhase === 'finished') return '게임이 종료되어 종을 누를 수 없습니다.';
+  if (state.value?.gamePhase !== 'playing') return '게임이 시작된 뒤 종을 누를 수 있습니다.';
+  if (myPlayer.value?.eliminated) return '이번 게임에서 탈락하여 종을 누를 수 없습니다.';
+  if (state.value?.bellLocked || actionPending.value) return '직전 종 판정을 처리하고 있습니다. 잠시 기다려주세요.';
+  return '';
+});
 
 const fruitMeta = [
   { id: 'strawberry', label: '딸기' },

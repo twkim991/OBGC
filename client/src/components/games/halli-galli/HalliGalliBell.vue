@@ -1,25 +1,30 @@
 <template>
   <div class="bell-wrap">
-    <button
-      type="button"
-      class="bell"
-      :class="{ ready, wrong: result === 'wrong', correct: result === 'correct' }"
-      :disabled="disabled"
-      aria-label="할리갈리 종 치기"
-      @click="$emit('ring')"
-    >
-      <span>종 치기</span>
-    </button>
+    <ActionGuard :reason="blockedReason" label="할리갈리 종 치기">
+      <button
+        type="button"
+        class="bell"
+        :class="{ ready, wrong: result === 'wrong', correct: result === 'correct' }"
+        :disabled="disabled"
+        aria-label="할리갈리 종 치기"
+        @click="$emit('ring')"
+      >
+        <span>종 치기</span>
+      </button>
+    </ActionGuard>
     <p>{{ hint }}</p>
   </div>
 </template>
 
 <script setup>
+import ActionGuard from '../shared/ActionGuard.vue';
+
 defineProps({
   ready: Boolean,
   disabled: Boolean,
   result: { type: String, default: '' },
   hint: { type: String, required: true },
+  blockedReason: { type: String, default: '' },
 });
 defineEmits(['ring']);
 </script>

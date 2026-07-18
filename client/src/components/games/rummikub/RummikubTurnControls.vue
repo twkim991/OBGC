@@ -6,22 +6,27 @@
       <span v-else>{{ allMeldsValid ? '모든 조합이 유효합니다.' : '미완성 조합을 정리해주세요.' }}</span>
     </div>
     <div class="edit-actions">
-      <button type="button" :disabled="!editable || !selectedCount" @click="$emit('new-meld')">새 조합</button>
-      <button type="button" :disabled="!editable || !selectedCount" @click="$emit('to-rack')">패로 이동</button>
-      <button type="button" :disabled="!editable || !canUndo" @click="$emit('undo')">실행 취소</button>
-      <button type="button" :disabled="!editable" @click="$emit('reset')">처음으로</button>
+      <ActionGuard :reason="selectionActionReason" label="새 조합"><button type="button" :disabled="Boolean(selectionActionReason)" @click="$emit('new-meld')">새 조합</button></ActionGuard>
+      <ActionGuard :reason="selectionActionReason" label="패로 이동"><button type="button" :disabled="Boolean(selectionActionReason)" @click="$emit('to-rack')">패로 이동</button></ActionGuard>
+      <ActionGuard :reason="undoReason" label="실행 취소"><button type="button" :disabled="Boolean(undoReason)" @click="$emit('undo')">실행 취소</button></ActionGuard>
+      <ActionGuard :reason="resetReason" label="처음으로"><button type="button" :disabled="Boolean(resetReason)" @click="$emit('reset')">처음으로</button></ActionGuard>
     </div>
     <div class="submit-actions">
-      <button class="draw" type="button" :disabled="!editable" @click="$emit(poolEmpty ? 'pass' : 'draw')">
-        {{ poolEmpty ? '패스' : '타일 1개 가져오기' }}
-      </button>
-      <button class="commit" type="button" :disabled="!canCommit" @click="$emit('commit')">턴 확정</button>
+      <ActionGuard :reason="editableReason" :label="poolEmpty ? '패스' : '타일 1개 가져오기'">
+        <button class="draw" type="button" :disabled="Boolean(editableReason)" @click="$emit(poolEmpty ? 'pass' : 'draw')">
+          {{ poolEmpty ? '패스' : '타일 1개 가져오기' }}
+        </button>
+      </ActionGuard>
+      <ActionGuard :reason="commitReason" label="턴 확정"><button class="commit" type="button" :disabled="Boolean(commitReason)" @click="$emit('commit')">턴 확정</button></ActionGuard>
     </div>
   </section>
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue';
+import ActionGuard from '../shared/ActionGuard.vue';
+
+const props = defineProps({
   editable: { type: Boolean, default: false },
   selectedCount: { type: Number, default: 0 },
   hasInitialMeld: { type: Boolean, default: false },
@@ -30,8 +35,14 @@ defineProps({
   canUndo: { type: Boolean, default: false },
   canCommit: { type: Boolean, default: false },
   poolEmpty: { type: Boolean, default: false },
+  editableReason: { type: String, default: '' },
+  commitReason: { type: String, default: '' },
 });
 defineEmits(['new-meld', 'to-rack', 'undo', 'reset', 'draw', 'pass', 'commit']);
+
+const selectionActionReason = computed(() => props.editableReason || (!props.selectedCount ? '먼저 이동할 타일을 하나 이상 선택하세요.' : ''));
+const undoReason = computed(() => props.editableReason || (!props.canUndo ? '아직 취소할 변경 사항이 없습니다.' : ''));
+const resetReason = computed(() => props.editableReason || (!props.canUndo ? '현재 배치를 변경하지 않았습니다.' : ''));
 </script>
 
 <style scoped>
@@ -48,4 +59,3 @@ defineEmits(['new-meld', 'to-rack', 'undo', 'reset', 'draw', 'pass', 'commit']);
 .turn-controls .commit { border-color: transparent; background: var(--color-primary); color: white; }
 @media (max-width: 820px) { .turn-controls { grid-template-columns: 1fr; } .edit-actions,.submit-actions { flex-wrap: wrap; } .submit-actions button { flex: 1; } }
 </style>
-

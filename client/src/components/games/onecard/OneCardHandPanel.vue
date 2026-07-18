@@ -8,12 +8,16 @@
       </span>
     </div>
     <div v-if="cards.length" class="hand-scroll">
-      <button
+      <ActionGuard
         v-for="card in cards"
         :key="card.id"
+        :reason="blockedReason(card)"
+        :label="`${formatCard(card)} 카드`"
+      >
+      <button
         class="game-card hand-card"
         :class="[`color-${card.color}`, { playable: isMyTurn && card.playable }]"
-        :disabled="!isMyTurn || !card.playable"
+        :disabled="Boolean(blockedReason(card))"
         type="button"
         @click="$emit('select', card)"
       >
@@ -21,6 +25,7 @@
         <b>{{ cardFace(card) }}</b>
         <span>{{ formatCard(card) }}</span>
       </button>
+      </ActionGuard>
     </div>
     <p v-else class="empty-state">아직 받은 카드가 없습니다.</p>
   </section>
@@ -28,11 +33,13 @@
 
 <script setup>
 import { computed } from 'vue';
+import ActionGuard from '../shared/ActionGuard.vue';
 import { cardFace, cardTypeLabel, formatCard } from '../../../games/onecard/presentation';
 
 const props = defineProps({
   cards: { type: Array, required: true },
   isMyTurn: { type: Boolean, required: true },
+  blockedReason: { type: Function, default: () => '' },
 });
 defineEmits(['select']);
 const playableCount = computed(() => props.cards.filter((card) => card.playable).length);
@@ -44,6 +51,7 @@ const playableCount = computed(() => props.cards.filter((card) => card.playable)
 .panel-heading h2 { margin: 0; font-size: 20px; }
 .panel-heading span { color: var(--color-muted); font-size: 13px; }
 .hand-scroll { display: flex; gap: var(--space-3); overflow-x: auto; padding: var(--space-2) var(--space-1) var(--space-3); scrollbar-width: thin; }
+.hand-scroll :deep(.action-guard) { flex: 0 0 138px; }
 .game-card { width: 138px; aspect-ratio: 2 / 3; display: flex; flex-direction: column; justify-content: space-between; padding: var(--space-3); border: 1px solid currentColor; border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-card); color: var(--color-ink); text-align: left; font-weight: 700; }
 .game-card small { font-size: 11px; letter-spacing: .06em; }
 .game-card b { align-self: center; font-size: 28px; }

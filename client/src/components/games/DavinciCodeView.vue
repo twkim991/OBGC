@@ -25,9 +25,9 @@
         <strong>{{ isHost ? '암호 대결을 시작할 준비가 됐나요?' : '방장이 게임을 시작할 때까지 기다려주세요.' }}</strong>
         <span>현재 {{ connectedPlayerCount }}명 · 2~4명 플레이</span>
       </div>
-      <button v-if="isHost" type="button" :disabled="connectedPlayerCount < 2" @click="startGame">
-        게임 시작
-      </button>
+      <ActionGuard v-if="isHost" :reason="startBlockedReason" label="게임 시작" block>
+        <button type="button" :disabled="Boolean(startBlockedReason)" @click="startGame">게임 시작</button>
+      </ActionGuard>
     </section>
 
     <section v-else-if="state?.gamePhase === 'setup'" class="setup-panel">
@@ -52,10 +52,10 @@
           <span v-for="index in initialCodeSize - initialColors.length" :key="`empty-${index}`" class="setup-token empty">선택</span>
         </div>
         <div class="setup-actions">
-          <button type="button" class="color-choice light" :disabled="initialColors.length >= initialCodeSize" @click="addInitialColor('light')">흰색 추가</button>
-          <button type="button" class="color-choice dark" :disabled="initialColors.length >= initialCodeSize" @click="addInitialColor('dark')">검정 추가</button>
-          <button type="button" class="secondary" :disabled="!initialColors.length" @click="initialColors = []">초기화</button>
-          <button type="button" class="primary" :disabled="initialColors.length !== initialCodeSize || actionPending" @click="submitInitialColors">코드 확정</button>
+          <ActionGuard :reason="addColorBlockedReason" label="흰색 타일 추가"><button type="button" class="color-choice light" :disabled="Boolean(addColorBlockedReason)" @click="addInitialColor('light')">흰색 추가</button></ActionGuard>
+          <ActionGuard :reason="addColorBlockedReason" label="검정 타일 추가"><button type="button" class="color-choice dark" :disabled="Boolean(addColorBlockedReason)" @click="addInitialColor('dark')">검정 추가</button></ActionGuard>
+          <ActionGuard :reason="resetSetupBlockedReason" label="시작 코드 초기화"><button type="button" class="secondary" :disabled="Boolean(resetSetupBlockedReason)" @click="initialColors = []">초기화</button></ActionGuard>
+          <ActionGuard :reason="confirmSetupBlockedReason" label="코드 확정"><button type="button" class="primary" :disabled="Boolean(confirmSetupBlockedReason)" @click="submitInitialColors">코드 확정</button></ActionGuard>
         </div>
       </template>
       <div v-else class="setup-progress">
@@ -74,6 +74,7 @@
             :player="player"
             :tiles="player.code"
             :selectable="canSelectOpponent && !player.eliminated"
+            :blocked-reason="(tile) => opponentTileBlockedReason(player, tile)"
             :selected-tile-id="selectedTarget?.playerId === player.sessionId ? selectedTarget.tileId : ''"
             @select="selectTarget"
           />
@@ -98,12 +99,8 @@
           </div>
 
           <div v-if="canDraw" class="draw-pool">
-            <button type="button" class="draw-btn light" :disabled="!state.lightPoolCount || actionPending" @click="drawTile('light')">
-              흰색 타일<span>남은 타일 {{ state.lightPoolCount }}개</span>
-            </button>
-            <button type="button" class="draw-btn dark" :disabled="!state.darkPoolCount || actionPending" @click="drawTile('dark')">
-              검정 타일<span>남은 타일 {{ state.darkPoolCount }}개</span>
-            </button>
+            <ActionGuard :reason="drawBlockedReason('light')" label="흰색 타일 뽑기" block><button type="button" class="draw-btn light" :disabled="Boolean(drawBlockedReason('light'))" @click="drawTile('light')">흰색 타일<span>남은 타일 {{ state.lightPoolCount }}개</span></button></ActionGuard>
+            <ActionGuard :reason="drawBlockedReason('dark')" label="검정 타일 뽑기" block><button type="button" class="draw-btn dark" :disabled="Boolean(drawBlockedReason('dark'))" @click="drawTile('dark')">검정 타일<span>남은 타일 {{ state.darkPoolCount }}개</span></button></ActionGuard>
           </div>
 
           <div v-if="privateCode.pendingDraw" class="clue-wrap">
@@ -126,7 +123,7 @@
                 <option v-for="number in 12" :key="number - 1" :value="String(number - 1)">{{ number - 1 }}</option>
               </select>
             </label>
-            <button type="submit" class="primary" :disabled="!selectedTarget || guessNumber === '' || actionPending">이 숫자로 추리</button>
+            <ActionGuard :reason="guessSubmitBlockedReason" label="이 숫자로 추리" block><button type="submit" class="primary" :disabled="Boolean(guessSubmitBlockedReason)">이 숫자로 추리</button></ActionGuard>
           </form>
 
           <div v-if="showDecision" class="decision-actions">
@@ -170,6 +167,7 @@ import { computed, ref, watch } from 'vue';
 import { toSystemErrorMessage } from '../../games/errors';
 import { DAVINCI_CODE_PROTOCOL } from '../../games/davinci-code/protocol';
 import { projectDavinciCodeState } from '../../games/davinci-code/state';
+import ActionGuard from './shared/ActionGuard.vue';
 import DavinciCodeRow from './davinci-code/DavinciCodeRow.vue';
 import DavinciResultModal from './davinci-code/DavinciResultModal.vue';
 import DavinciTile from './davinci-code/DavinciTile.vue';
@@ -237,6 +235,36 @@ const showGuessForm = computed(
       (state.value?.turnPhase === 'decision' && continuingGuess.value))
 );
 const canSelectOpponent = computed(() => showGuessForm.value && !actionPending.value);
+
+const startBlockedReason = computed(() => connectedPlayerCount.value < 2 ? '플레이어가 2명 이상 모여야 시작할 수 있습니다.' : '');
+const addColorBlockedReason = computed(() => initialColors.value.length >= initialCodeSize.value ? `시작 코드에 필요한 타일 ${initialCodeSize.value}개를 모두 선택했습니다.` : '');
+const resetSetupBlockedReason = computed(() => initialColors.value.length ? '' : '아직 선택한 타일이 없습니다.');
+const confirmSetupBlockedReason = computed(() => {
+  if (actionPending.value) return '선택한 시작 코드를 처리하고 있습니다.';
+  const remaining = initialCodeSize.value - initialColors.value.length;
+  return remaining > 0 ? `타일 색상을 ${remaining}개 더 선택하세요.` : '';
+});
+const guessSubmitBlockedReason = computed(() => {
+  if (actionPending.value) return '이전 추리를 처리하고 있습니다. 잠시 기다려주세요.';
+  if (!selectedTarget.value) return '먼저 추리할 상대 타일을 선택하세요.';
+  if (guessNumber.value === '') return '예상 숫자를 선택하세요.';
+  return '';
+});
+
+function drawBlockedReason(color) {
+  if (actionPending.value) return '타일을 뽑는 중입니다. 잠시 기다려주세요.';
+  const count = color === 'light' ? state.value?.lightPoolCount : state.value?.darkPoolCount;
+  return count ? '' : `${color === 'light' ? '흰색' : '검정'} 타일 더미가 비었습니다. 다른 색을 선택하세요.`;
+}
+
+function opponentTileBlockedReason(player, tile) {
+  if (tile.revealed) return '이미 공개된 타일은 다시 추리할 필요가 없습니다.';
+  if (player.eliminated) return '탈락한 플레이어의 타일은 선택할 수 없습니다.';
+  if (!isMyTurn.value) return `${currentPlayer.value?.nickname || '다른 플레이어'}님의 차례입니다.`;
+  if (!showGuessForm.value) return state.value?.turnPhase === 'draw' ? '먼저 검정 또는 흰색 타일을 한 장 뽑으세요.' : '계속 추리하기를 선택한 뒤 상대 타일을 고를 수 있습니다.';
+  if (actionPending.value) return '이전 추리를 처리하고 있습니다. 잠시 기다려주세요.';
+  return '';
+}
 
 const currentPlayer = computed(() => players.value.find((player) => player.sessionId === state.value?.currentTurnId));
 const phaseSummary = computed(() => {
