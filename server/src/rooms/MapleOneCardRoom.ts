@@ -230,7 +230,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     });
 
     this.onMessage(ONECARD_MESSAGES.returnToTable, async (client) => {
-      if (this.state.gamePhase !== 'finished' || this.isReturning) return;
+      if (this.isReturning) return;
       this.isReturning = true;
 
       try {

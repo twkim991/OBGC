@@ -286,7 +286,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
 
     // 🎯 3. 대기실 복귀 로직
     this.onMessage(YUTNORI_MESSAGES.returnToTable, async (client) => {
-      if (this.state.gamePhase !== 'finished' || this.isReturning) return;
+      if (this.isReturning) return;
       this.isReturning = true;
 
       try {

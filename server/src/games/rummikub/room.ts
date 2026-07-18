@@ -229,7 +229,7 @@ export class RummikubRoom extends Room<RummikubState> {
     });
 
     this.onMessage(RUMMIKUB_MESSAGES.returnToTable, async (client) => {
-      if (this.state.gamePhase !== 'finished' || this.isReturning) return;
+      if (this.isReturning) return;
       const requestingPlayer = this.state.players.get(client.sessionId);
       if (!requestingPlayer) return;
       this.isReturning = true;

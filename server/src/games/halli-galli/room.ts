@@ -362,7 +362,7 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
   }
 
   private async handleReturnToTable(client: Client) {
-    if (this.state.gamePhase !== 'finished' || this.isReturning || !this.state.players.has(client.sessionId)) return;
+    if (this.isReturning || !this.state.players.has(client.sessionId)) return;
     this.isReturning = true;
     try {
       const participants = this.clients.reduce<MigrationParticipant[]>((result, participantClient) => {

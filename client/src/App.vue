@@ -9,9 +9,19 @@
             <small>온라인 보드게임 카페</small>
           </span>
         </div>
-        <div class="connection-status" aria-live="polite">
-          <span class="connection-dot" :class="{ ready: colyseusClient }" aria-hidden="true"></span>
-          {{ colyseusClient ? '게임 서버 준비됨' : '게임 서버 연결 중' }}
+        <div class="app-header-actions">
+          <div class="connection-status" aria-live="polite">
+            <span class="connection-dot" :class="{ ready: colyseusClient }" aria-hidden="true"></span>
+            {{ colyseusClient ? '게임 서버 준비됨' : '게임 서버 연결 중' }}
+          </div>
+          <button
+            v-if="currentView === 'game'"
+            type="button"
+            class="leave-game-button"
+            @click="handleLeaveGame"
+          >
+            대기실로 나가기
+          </button>
         </div>
       </div>
     </header>
@@ -224,6 +234,13 @@ const handleLeaveRoom = () => {
     roomConnection.value = null;
   }
   currentView.value = 'lobby';
+};
+
+const handleLeaveGame = () => {
+  const shouldLeave = window.confirm(
+    '현재 게임을 종료하고 모든 참가자와 함께 테이블 대기실로 돌아갈까요?',
+  );
+  if (shouldLeave) roomConnection.value?.send('return_to_table');
 };
 
 // 🔥 강제 이주 신호를 받았을 때 (대기실 가기 & 게임하러 가기 둘 다 처리!)
@@ -450,6 +467,12 @@ p {
   font-size: 12px;
 }
 
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
 .connection-status {
   display: inline-flex;
   align-items: center;
@@ -469,6 +492,23 @@ p {
 .connection-dot.ready {
   background: var(--color-success);
   box-shadow: 0 0 0 4px rgba(26, 174, 57, 0.1);
+}
+
+.leave-game-button {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, var(--color-border));
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-danger);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.leave-game-button:hover {
+  border-color: color-mix(in srgb, var(--color-danger) 58%, var(--color-border));
+  background: color-mix(in srgb, var(--color-danger) 6%, white);
 }
 
 .app-container {
@@ -528,6 +568,16 @@ p {
     font-size: 11px;
   }
 
+  .app-header-actions {
+    gap: var(--space-2);
+  }
+
+  .leave-game-button {
+    min-height: 34px;
+    padding: 0 var(--space-3);
+    font-size: 12px;
+  }
+
   .app-container {
     padding-top: var(--space-6);
   }
@@ -539,9 +589,7 @@ p {
   }
 
   .connection-status {
-    max-width: 120px;
-    justify-content: flex-end;
-    text-align: right;
+    display: none;
   }
 }
 </style>

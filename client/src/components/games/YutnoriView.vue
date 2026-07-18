@@ -10,7 +10,6 @@
           <span>현재 턴</span>
           <strong>{{ currentTurnName }} · {{ phaseLabel }}</strong>
         </div>
-        <button class="leave-button" type="button" @click="leave">게임 나가기</button>
       </div>
     </header>
 
@@ -308,23 +307,6 @@ const getThrowName = (steps) => {
   font-size: 13px;
 }
 
-.leave-button {
-  min-height: 44px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  padding: 0 var(--space-4);
-  background: var(--color-surface);
-  color: var(--color-danger);
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.leave-button:hover {
-  border-color: color-mix(in oklab, var(--color-danger), var(--color-border) 68%);
-  background: #fff7f6;
-}
-
 .play-grid {
   display: grid;
   grid-template-columns: minmax(460px, 1fr) minmax(320px, 400px);
@@ -360,17 +342,11 @@ const getThrowName = (steps) => {
     flex: 1;
     justify-content: space-between;
   }
-
 }
 
 @media (max-width: 480px) {
   .topbar-actions {
     flex-direction: column;
   }
-
-  .leave-button {
-    width: 100%;
-  }
-
 }
 </style>

@@ -259,7 +259,7 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
     );
 
     this.onMessage(DAVINCI_CODE_MESSAGES.returnToTable, async (client) => {
-      if (this.state.gamePhase !== 'finished' || this.isReturning) return;
+      if (this.isReturning) return;
       if (!this.state.players.has(client.sessionId)) return;
       this.isReturning = true;
       try {
