@@ -8,7 +8,8 @@
       </div>
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ phaseSummary.label }}</span>
-        <strong>{{ phaseSummary.value }}</strong>
+        <strong>{{ phaseSummary.title }}</strong>
+        <small>{{ phaseSummary.description }}</small>
       </div>
     </header>
 
@@ -239,11 +240,61 @@ const canSelectOpponent = computed(() => showGuessForm.value && !actionPending.v
 
 const currentPlayer = computed(() => players.value.find((player) => player.sessionId === state.value?.currentTurnId));
 const phaseSummary = computed(() => {
-  if (state.value?.gamePhase === 'waiting') return { label: '게임 준비', value: `${players.value.length}명 참가` };
-  if (state.value?.gamePhase === 'setup') return { label: '코드 준비', value: `${players.value.filter((player) => player.setupComplete).length} / ${players.value.length}명` };
-  if (state.value?.gamePhase === 'finished') return { label: '게임 종료', value: state.value.lastAction };
-  const suffix = state.value?.turnPhase === 'draw' ? '타일 뽑기' : state.value?.turnPhase === 'decision' ? '계속 여부 선택' : '숫자 추리';
-  return { label: '현재 턴', value: `${currentPlayer.value?.nickname || '-'} · ${suffix}` };
+  if (state.value?.gamePhase === 'waiting') {
+    return {
+      label: '게임 준비',
+      title: '게임 시작을 기다리고 있습니다.',
+      description: `현재 ${players.value.length}명입니다. 방장이 시작하면 각자 비밀 코드를 만듭니다.`,
+    };
+  }
+  if (state.value?.gamePhase === 'setup') {
+    if (myPlayer.value?.setupComplete) {
+      return {
+        label: '시작 코드 준비',
+        title: '내 시작 코드가 준비되었습니다.',
+        description: `현재 ${players.value.filter((player) => player.setupComplete).length} / ${players.value.length}명이 준비를 마쳤습니다.`,
+      };
+    }
+    return {
+      label: '시작 코드 준비',
+      title: `시작할 타일의 색상을 ${initialCodeSize.value}개 선택하세요.`,
+      description: '선택한 타일은 숫자순으로 정렬되어 나만 볼 수 있는 시작 코드가 됩니다.',
+    };
+  }
+  if (state.value?.gamePhase === 'finished') {
+    return {
+      label: '게임 종료',
+      title: state.value.lastAction || '암호 대결이 끝났습니다.',
+      description: '최종 순위를 확인하고 대기실로 돌아갈 수 있습니다.',
+    };
+  }
+  const playerName = currentPlayer.value?.nickname || '플레이어';
+  if (!isMyTurn.value) {
+    return {
+      label: `${playerName}님의 차례`,
+      title: state.value?.turnPhase === 'draw' ? '새 타일을 고르고 있습니다.' : '숨은 숫자를 추리하고 있습니다.',
+      description: '공개되는 타일과 코드의 정렬 위치를 주의 깊게 살펴보세요.',
+    };
+  }
+  if (state.value?.turnPhase === 'draw') {
+    return {
+      label: '내 차례 · 타일 뽑기 단계',
+      title: '검정 또는 흰색 타일을 뽑으세요.',
+      description: '뽑은 타일을 확인한 뒤 상대의 숨은 숫자를 추리하게 됩니다.',
+    };
+  }
+  if (state.value?.turnPhase === 'decision' && !continuingGuess.value) {
+    return {
+      label: '내 차례 · 계속 여부 선택 단계',
+      title: '계속 추리할지 결정하세요.',
+      description: '지금 멈추면 새 타일을 숨긴 채 넣습니다. 계속하다 틀리면 새 타일이 공개됩니다.',
+    };
+  }
+  return {
+    label: '내 차례 · 숫자 추리 단계',
+    title: '상대의 숨은 타일을 추리하세요.',
+    description: '맞히면 해당 타일이 공개되고 계속 추리할 수 있습니다. 틀리면 턴이 끝납니다.',
+  };
 });
 
 const actionStepLabel = computed(() => {
@@ -348,10 +399,11 @@ function returnToTable() {
 .eyebrow { margin: 0 0 4px; color: var(--color-muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .game-topbar h1 { margin: 0; font-size: clamp(34px,5vw,52px); line-height: 1; letter-spacing: -.045em; }
 .game-topbar > div > p:last-child { margin: 10px 0 0; color: var(--color-muted); font-size: 14px; }
-.turn-chip { min-width: 210px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
-.turn-chip span, .turn-chip strong { display: block; }
-.turn-chip span { color: var(--color-muted); font-size: 11px; }
-.turn-chip strong { margin-top: 2px; }
+.turn-chip { width: min(360px,100%); min-width: 300px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
+.turn-chip span,.turn-chip strong,.turn-chip small { display: block; }
+.turn-chip span { color: var(--color-muted); font-size: 10px; }
+.turn-chip strong { margin-top: 3px; font-size: 13px; }
+.turn-chip small { margin-top: 4px; color: var(--color-muted); font-size: 10px; line-height: 1.4; }
 .turn-chip.mine { border-color: color-mix(in srgb,var(--color-primary) 34%,var(--color-border)); background: color-mix(in srgb,var(--color-primary) 6%,white); }
 .status-strip { display: grid; grid-template-columns: 110px 110px 90px minmax(0,1fr); border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: white; overflow: hidden; }
 .status-strip > div { min-height: 68px; padding: 13px 15px; border-right: 1px solid var(--color-border-soft); }

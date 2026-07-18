@@ -6,9 +6,10 @@
         <h1>초능력 윷놀이</h1>
       </div>
       <div class="topbar-actions">
-        <div class="turn-status" role="status">
-          <span>현재 턴</span>
-          <strong>{{ currentTurnName }} · {{ phaseLabel }}</strong>
+        <div class="turn-status" :class="{ mine: isMyTurn }" role="status">
+          <span>{{ turnGuide.label }}</span>
+          <strong>{{ turnGuide.title }}</strong>
+          <small>{{ turnGuide.description }}</small>
         </div>
       </div>
     </header>
@@ -133,6 +134,17 @@ const phaseDescription = computed(() => {
   if (gamePhase.value === 'moving') return '보유한 윷 결과 하나와 움직일 말을 선택하세요.';
   return '초능력을 먼저 선택하거나 바로 던질 수 있습니다.';
 });
+
+const turnGuide = computed(() => ({
+  label:
+    gamePhase.value === 'waiting'
+      ? '게임 준비'
+      : gamePhase.value === 'finished'
+        ? '게임 종료'
+        : `${isMyTurn.value ? '내 차례' : `${currentTurnName.value}님의 차례`} · ${phaseLabel.value} 단계`,
+  title: phaseTitle.value,
+  description: phaseDescription.value,
+}));
 
 const mySkills = computed(() => {
   return privateSkills.value;
@@ -292,11 +304,9 @@ const getThrowName = (steps) => {
 }
 
 .turn-status {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  width: min(360px, 100%);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid color-mix(in oklab, var(--color-primary), var(--color-border) 74%);
   border-radius: var(--radius-small);
   background: color-mix(in oklab, var(--color-primary) 6%, white);
@@ -304,7 +314,29 @@ const getThrowName = (steps) => {
 
 .turn-status span {
   color: var(--color-muted);
+  font-size: 10px;
+}
+
+.turn-status strong,
+.turn-status small {
+  display: block;
+}
+
+.turn-status strong {
+  margin-top: 3px;
   font-size: 13px;
+}
+
+.turn-status small {
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.turn-status.mine {
+  border-color: color-mix(in oklab, var(--color-primary), var(--color-border) 58%);
+  background: color-mix(in oklab, var(--color-primary) 9%, white);
 }
 
 .play-grid {
@@ -340,7 +372,6 @@ const getThrowName = (steps) => {
   .turn-status {
     min-width: 0;
     flex: 1;
-    justify-content: space-between;
   }
 }
 

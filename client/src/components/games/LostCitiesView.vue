@@ -7,7 +7,7 @@
         <p>탐험을 시작했다면 더 큰 숫자만 놓을 수 있습니다. 위험을 감수해 가장 값진 원정을 완성하세요.</p>
       </div>
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
-        <span>{{ turnStatus.label }}</span><strong>{{ turnStatus.value }}</strong>
+        <span>{{ turnStatus.label }}</span><strong>{{ turnStatus.title }}</strong><small>{{ turnStatus.description }}</small>
       </div>
     </header>
 
@@ -216,12 +216,29 @@ const rankingPlayers = computed(() => (state.value?.rankings || []).map((id, ind
   rank: index + 1,
 })));
 const turnStatus = computed(() => {
-  if (state.value?.gamePhase === 'waiting') return { label: '게임 준비', value: `${connectedPlayerCount.value}명 참가` };
-  if (state.value?.gamePhase === 'round_result') return { label: '라운드 종료', value: roundWinnerNames.value };
-  if (state.value?.gamePhase === 'finished') return { label: '게임 종료', value: '최종 점수 집계 완료' };
+  if (state.value?.gamePhase === 'waiting') return { label: '게임 준비', title: '게임 시작을 기다리고 있습니다.', description: `현재 ${connectedPlayerCount.value}명입니다. 두 탐험가가 모이면 게임을 시작할 수 있습니다.` };
+  if (state.value?.gamePhase === 'round_result') return { label: '라운드 종료', title: '이번 라운드의 점수를 확인하세요.', description: `이번 라운드 최고 점수: ${roundWinnerNames.value}. 방장이 다음 라운드를 시작할 수 있습니다.` };
+  if (state.value?.gamePhase === 'finished') return { label: '게임 종료', title: '세 라운드의 탐험이 끝났습니다.', description: '최종 누적 점수와 순위를 확인하고 대기실로 돌아갈 수 있습니다.' };
+  const currentName = playerName(state.value?.currentTurnId);
+  if (!isMyTurn.value) return {
+    label: `${currentName}님의 차례 · ${state.value?.actionPhase === 'draw' ? '카드 뽑기' : '카드 내려놓기'} 단계`,
+    title: state.value?.actionPhase === 'draw' ? `${currentName}님이 카드 한 장을 뽑고 있습니다.` : `${currentName}님이 내려놓을 카드를 선택하고 있습니다.`,
+    description: '상대 탐험대와 버림 더미에 어떤 카드가 추가되는지 확인하세요.',
+  };
+  if (state.value?.actionPhase === 'draw') return {
+    label: '내 차례 · 카드 뽑기 단계',
+    title: '카드 한 장을 뽑으세요.',
+    description: '덱이나 버림 더미에서 가져오면 턴이 끝납니다. 방금 버린 카드는 다시 가져올 수 없습니다.',
+  };
+  if (selectedCard.value && !canPlaySelected.value) return {
+    label: '내 차례 · 카드 내려놓기 단계',
+    title: '이 카드는 현재 탐험대에 놓을 수 없습니다.',
+    description: '기존 숫자보다 큰 카드만 놓을 수 있습니다. 선택한 카드를 버림 더미에 버릴 수는 있습니다.',
+  };
   return {
-    label: isMyTurn.value ? '내 차례' : '현재 차례',
-    value: `${playerName(state.value?.currentTurnId)} · ${state.value?.actionPhase === 'draw' ? '카드 뽑기' : '카드 내려놓기'}`,
+    label: '내 차례 · 카드 내려놓기 단계',
+    title: '손패에서 카드 한 장을 선택하세요.',
+    description: '탐험대에 놓거나 같은 색의 버림 더미에 버릴 수 있습니다.',
   };
 });
 const actionCopy = computed(() => {
@@ -263,7 +280,8 @@ function returnToTable() { room.value?.send(LOST_CITIES_PROTOCOL.messages.return
 
 <style scoped>
 .lost-game{display:grid;gap:16px;color:var(--color-ink)}.game-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.eyebrow{margin:0 0 5px;color:var(--color-meta);font-size:9px;font-weight:800;letter-spacing:.14em}.game-topbar h1{margin:0;font-size:32px;letter-spacing:-.04em}.game-topbar>div>p:last-child{margin:5px 0 0;color:var(--color-muted);font-size:12px}.turn-chip{min-width:230px;padding:11px 14px;border:1px solid var(--color-border);border-radius:7px;background:#fff}.turn-chip span,.turn-chip strong{display:block}.turn-chip span{color:var(--color-meta);font-size:9px}.turn-chip strong{margin-top:3px;font-size:12px}.turn-chip.mine{border-color:#a65300;background:#fff8ef}.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;overflow:hidden;border:1px solid var(--color-border);border-radius:8px;background:var(--color-border-soft)}.status-strip>div{padding:11px 14px;background:#fff}.status-strip>div.mine{background:#fff8ef}.status-strip span{display:block;color:var(--color-meta);font-size:9px}.status-strip strong{display:block;margin-top:3px;font:800 15px/1.2 ui-monospace,monospace}.error-banner{margin:0;padding:10px 12px;border:1px solid #ecc8c8;border-radius:6px;background:#fff5f5;color:#a52d2d;font-size:11px}.waiting-panel{display:flex;align-items:center;justify-content:space-between;padding:24px;border:1px solid var(--color-border);border-radius:10px;background:#fff}.waiting-panel strong,.waiting-panel span{display:block}.waiting-panel span{margin-top:5px;color:var(--color-muted);font-size:11px}.waiting-panel button,.primary,.round-result button{min-height:42px;padding:0 17px;border:0;border-radius:6px;background:#a65300;color:#fff;font-weight:800;cursor:pointer}.waiting-panel button:disabled,.play-actions button:disabled,.deck-button:disabled{opacity:.42;cursor:not-allowed}.play-grid{display:grid;grid-template-columns:minmax(0,1.75fr) 320px;gap:16px}.board-panel,.action-panel,.hand-panel{min-width:0;padding:14px;border:1px solid var(--color-border);border-radius:10px;background:#fff}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-heading h2{margin:0;font-size:13px}.panel-heading span,.panel-heading small{display:block;margin-top:3px;color:var(--color-meta);font-size:9px}.expedition-scroll{overflow-x:auto;margin-top:12px;padding-bottom:4px}.expeditions{min-width:760px;display:grid;grid-template-columns:repeat(5,minmax(136px,1fr));gap:7px}.board-note{margin:10px 0 0;color:var(--color-muted);font-size:10px}.phase-steps{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:13px}.phase-steps>div{display:flex;align-items:center;gap:7px;min-height:39px;padding:7px;border:1px solid var(--color-border-soft);border-radius:6px;color:var(--color-meta)}.phase-steps b{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:var(--color-surface-muted);font:800 10px/1 ui-monospace,monospace}.phase-steps span{font-size:10px;font-weight:700}.phase-steps .active{border-color:#c58b51;background:#fff8ef;color:#874500}.phase-steps .active b{background:#a65300;color:#fff}.phase-copy,.selection-summary,.activity-panel{margin-top:12px;padding:12px;border-radius:7px;background:var(--color-surface-muted)}.phase-copy strong,.phase-copy span,.activity-panel span,.activity-panel strong{display:block}.phase-copy strong{font-size:12px}.phase-copy span{margin-top:4px;color:var(--color-muted);font-size:10px;line-height:1.45}.selection-summary{min-height:78px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:7px 10px}.selection-summary>span{grid-column:1/-1;color:var(--color-meta);font-size:9px}.selection-summary strong{font-size:11px}.selection-summary em{grid-column:1/-1;color:var(--color-muted);font-size:10px;font-style:normal}.play-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.play-actions button{min-height:42px;border-radius:6px;font-weight:800;cursor:pointer}.secondary{border:1px solid var(--color-border);background:#fff;color:var(--color-ink)}.play-actions small{grid-column:1/-1;color:#a22c2c;font-size:9px;line-height:1.4}.draw-actions{margin-top:12px}.deck-button{width:100%;min-height:88px;display:grid;grid-template-columns:42px 1fr;grid-template-rows:1fr 1fr;align-items:end;column-gap:10px;padding:13px;border:1px solid #c58b51;border-radius:7px;background:#fff8ef;color:#874500;text-align:left;cursor:pointer}.deck-button i{grid-row:1/3;width:38px;height:54px;border:1px solid #a65300;border-radius:4px;background:repeating-linear-gradient(45deg,#fff8ef,#fff8ef 4px,#efdcc5 4px,#efdcc5 8px);box-shadow:3px -3px 0 #fff,4px -4px 0 #c58b51}.deck-button strong{align-self:end;font-size:12px}.deck-button span{align-self:start;color:#9a7048;font-size:9px}.draw-actions p{margin:9px 0 0;color:var(--color-muted);font-size:9px;line-height:1.5}.activity-panel{margin-top:14px;border-left:3px solid #a65300}.activity-panel span{color:var(--color-meta);font-size:8px;text-transform:uppercase;letter-spacing:.08em}.activity-panel strong{margin-top:4px;font-size:10px;line-height:1.45}.round-result{display:grid;gap:7px;margin-top:12px;padding:14px;border-radius:7px;background:#fff8ef}.round-result>p{margin:0;color:#a65300;font-size:9px;font-weight:800;letter-spacing:.1em}.round-result>strong{font-size:14px}.round-result>div{display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid #ead9c5;font-size:11px}.round-result>small{color:var(--color-muted);font-size:9px}.hand-panel{padding-bottom:12px}.hand-panel>.panel-heading>small{max-width:390px;text-align:right}.hand-scroll{overflow-x:auto;padding:12px 2px 4px}.hand-cards{min-height:154px;display:flex;align-items:flex-end;justify-content:center;gap:11px}.hand-cards.ready :deep(button.lost-card){animation:lost-hand-invite 2.8s ease-in-out infinite}.hand-cards.ready :deep(button.lost-card:hover),.hand-cards.ready :deep(button.lost-card.selected){animation:none}.empty-hand{margin:auto;color:var(--color-muted);font-size:11px}@keyframes lost-hand-invite{0%,100%{translate:0 0}50%{translate:0 -3px}}@media(prefers-reduced-motion:reduce){.hand-cards.ready :deep(button.lost-card){animation:none}}
+.turn-chip{width:min(360px,100%);min-width:300px}.turn-chip strong{font-size:13px}.turn-chip small{display:block;margin-top:4px;color:var(--color-muted);font-size:10px;line-height:1.4}
 @media(max-width:1080px){.play-grid{grid-template-columns:1fr}.action-panel{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.action-panel>.panel-heading,.phase-steps,.activity-panel{grid-column:1/-1}.hand-cards{justify-content:flex-start}}
-@media(max-width:760px){.game-topbar{align-items:flex-start;flex-direction:column}.turn-chip{width:100%}.status-strip{grid-template-columns:1fr 1fr}.action-panel{display:block}.waiting-panel{align-items:flex-start;flex-direction:column;gap:15px}.waiting-panel button{width:100%}.hand-panel>.panel-heading{align-items:flex-start;flex-direction:column}.hand-panel>.panel-heading>small{text-align:left}}
+@media(max-width:760px){.game-topbar{align-items:flex-start;flex-direction:column}.turn-chip{width:100%;min-width:0}.status-strip{grid-template-columns:1fr 1fr}.action-panel{display:block}.waiting-panel{align-items:flex-start;flex-direction:column;gap:15px}.waiting-panel button{width:100%}.hand-panel>.panel-heading{align-items:flex-start;flex-direction:column}.hand-panel>.panel-heading>small{text-align:left}}
 @media(max-width:430px){.status-strip>div{padding:9px}.board-panel,.action-panel,.hand-panel{padding:11px}.play-actions{grid-template-columns:1fr}.play-actions small{grid-column:1}.game-topbar h1{font-size:28px}}
 </style>

@@ -7,8 +7,9 @@
         <p>조합을 완성하고, 보드를 재구성해 가장 먼저 패를 비우세요.</p>
       </div>
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
-        <span>{{ state?.gamePhase === 'waiting' ? '게임 준비' : '현재 턴' }}</span>
-        <strong>{{ state?.gamePhase === 'waiting' ? `${players.length}명 참가` : currentPlayerName }}</strong>
+        <span>{{ turnGuide.label }}</span>
+        <strong>{{ turnGuide.title }}</strong>
+        <small>{{ turnGuide.description }}</small>
       </div>
     </header>
 
@@ -282,6 +283,51 @@ const canCommit = computed(
     (myPlayer.value?.hasInitialMeld || initialMeldScore.value >= 30)
 );
 
+const turnGuide = computed(() => {
+  if (state.value?.gamePhase === 'waiting') {
+    return {
+      label: '게임 준비',
+      title: '게임 시작을 기다리고 있습니다.',
+      description: `현재 ${connectedPlayerCount.value}명입니다. 시작하면 각자 타일 14개를 받습니다.`,
+    };
+  }
+  if (state.value?.gamePhase === 'finished') {
+    return {
+      label: '게임 종료',
+      title: state.value.lastAction || '게임이 끝났습니다.',
+      description: '최종 점수와 순위를 확인하고 대기실로 돌아갈 수 있습니다.',
+    };
+  }
+  if (!isMyTurn.value) {
+    return {
+      label: `${currentPlayerName.value}님의 차례`,
+      title: '타일 조합을 만들고 있습니다.',
+      description: '보드의 조합이 재구성될 수 있으니 바뀌는 타일 위치를 확인하세요.',
+    };
+  }
+  if (draftHistory.value.length > 0 && !allMeldsValid.value) {
+    return {
+      label: '내 차례 · 조합 정리 단계',
+      title: '완성되지 않은 조합을 정리하세요.',
+      description: '모든 타일이 유효한 그룹이나 연속 조합에 포함되어야 턴을 확정할 수 있습니다.',
+    };
+  }
+  if (!myPlayer.value?.hasInitialMeld) {
+    return {
+      label: '내 차례 · 첫 등록 단계',
+      title: '내 타일만으로 30점 이상을 등록하세요.',
+      description: '유효한 조합을 만드세요. 등록하지 못하면 타일 한 개를 가져오고 턴이 끝납니다.',
+    };
+  }
+  return {
+    label: '내 차례 · 조합 단계',
+    title: '유효한 조합을 만들고 턴을 확정하세요.',
+    description: (state.value?.poolCount || 0) > 0
+      ? '내 타일을 하나 이상 사용하거나, 타일 한 개를 가져오면 턴이 끝납니다.'
+      : '내 타일을 하나 이상 사용하세요. 더 할 수 없다면 패스할 수 있습니다.',
+  };
+});
+
 const rankingPlayers = computed(() =>
   (state.value?.rankings || []).map((sessionId) => {
     const player = players.value.find((item) => item.sessionId === sessionId);
@@ -407,11 +453,11 @@ function returnToTable() {
 .eyebrow { margin: 0 0 4px; color: var(--color-muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .game-topbar h1 { margin: 0; font-size: clamp(34px,5vw,52px); line-height: 1; letter-spacing: -.045em; }
 .game-topbar > div > p:last-child { margin: 10px 0 0; color: var(--color-muted); font-size: 14px; }
-.turn-chip { min-width: 180px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
-.turn-chip span,
-.turn-chip strong { display: block; }
-.turn-chip span { color: var(--color-muted); font-size: 11px; }
-.turn-chip strong { margin-top: 2px; }
+.turn-chip { width: min(360px,100%); min-width: 300px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
+.turn-chip span,.turn-chip strong,.turn-chip small { display: block; }
+.turn-chip span { color: var(--color-muted); font-size: 10px; }
+.turn-chip strong { margin-top: 3px; font-size: 13px; }
+.turn-chip small { margin-top: 4px; color: var(--color-muted); font-size: 10px; line-height: 1.4; }
 .turn-chip.mine { border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border)); background: color-mix(in srgb, var(--color-success) 7%, white); }
 .status-strip { display: grid; grid-template-columns: 110px 110px 90px minmax(0,1fr); border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: white; overflow: hidden; }
 .status-strip > div { min-height: 68px; padding: 13px 15px; border-right: 1px solid var(--color-border-soft); }

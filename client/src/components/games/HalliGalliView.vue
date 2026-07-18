@@ -7,8 +7,9 @@
         <p>공개된 맨 위 카드에서 같은 과일이 정확히 5개면 누구보다 먼저 종을 누르세요.</p>
       </div>
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
-        <span>{{ state?.finalRound ? '최종 라운드' : '현재 차례' }}</span>
-        <strong>{{ turnSummary }}</strong>
+        <span>{{ turnGuide.label }}</span>
+        <strong>{{ turnGuide.title }}</strong>
+        <small>{{ turnGuide.description }}</small>
       </div>
     </header>
 
@@ -162,10 +163,47 @@ const bellHint = computed(() => {
   if (state.value?.lastBellResult === 'wrong') return '정확히 5개가 아니었습니다.';
   return '정확히 5개가 아니라면 오답 페널티를 받습니다.';
 });
-const turnSummary = computed(() => {
-  if (state.value?.gamePhase === 'waiting') return `${connectedPlayerCount.value}명 참가`;
-  if (state.value?.gamePhase === 'finished') return state.value.lastAction;
-  return `${currentPlayer.value?.nickname || '-'} · 카드 공개`;
+const turnGuide = computed(() => {
+  if (state.value?.gamePhase === 'waiting') {
+    return {
+      label: '게임 준비',
+      title: '게임 시작을 기다리고 있습니다.',
+      description: `현재 ${connectedPlayerCount.value}명입니다. 시작하면 각자 과일 카드 더미를 받습니다.`,
+    };
+  }
+  if (state.value?.gamePhase === 'finished') {
+    return {
+      label: '게임 종료',
+      title: state.value.lastAction || '종 대결이 끝났습니다.',
+      description: '최종 카드 수와 순위를 확인하고 대기실로 돌아갈 수 있습니다.',
+    };
+  }
+  if (myPlayer.value?.eliminated) {
+    return {
+      label: '관전 중',
+      title: '이번 게임에서 탈락했습니다.',
+      description: '남은 플레이어가 카드를 공개하고 종을 누르는 과정을 지켜볼 수 있습니다.',
+    };
+  }
+  if (state.value?.exactFiveFruit) {
+    return {
+      label: `${state.value?.finalRound ? '최종 라운드 · ' : ''}종을 칠 기회`,
+      title: `${exactFruitLabel.value} 합계가 정확히 5개입니다.`,
+      description: '누구의 차례인지와 관계없이 중앙 종을 먼저 누르세요.',
+    };
+  }
+  if (isMyTurn.value) {
+    return {
+      label: `${state.value?.finalRound ? '최종 라운드 · ' : ''}내 차례 · 카드 공개 단계`,
+      title: '카드 한 장을 공개하세요.',
+      description: '카드를 공개한 직후 같은 과일의 합이 정확히 5개인지 확인하세요.',
+    };
+  }
+  return {
+    label: `${state.value?.finalRound ? '최종 라운드 · ' : ''}${currentPlayer.value?.nickname || '플레이어'}님의 차례`,
+    title: '공개될 카드를 지켜보세요.',
+    description: '차례와 관계없이 같은 과일이 정확히 5개가 되는 순간 종을 누를 수 있습니다.',
+  };
 });
 const actionCopy = computed(() => {
   if (state.value?.gamePhase === 'finished') return { title: '게임이 종료되었습니다.', description: '최종 카드 수와 순위를 확인하세요.' };
@@ -234,10 +272,11 @@ function playBellSound(bright) {
 .eyebrow { margin: 0 0 4px; color: var(--color-muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
 .game-topbar h1 { margin: 0; font-size: clamp(34px,5vw,52px); line-height: 1; letter-spacing: -.045em; }
 .game-topbar > div > p:last-child { margin: 10px 0 0; color: var(--color-muted); font-size: 14px; }
-.turn-chip { min-width: 210px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
-.turn-chip span, .turn-chip strong { display: block; }
-.turn-chip span { color: var(--color-muted); font-size: 11px; }
-.turn-chip strong { margin-top: 2px; }
+.turn-chip { width: min(360px,100%); min-width: 300px; padding: 11px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-small); background: white; }
+.turn-chip span,.turn-chip strong,.turn-chip small { display: block; }
+.turn-chip span { color: var(--color-muted); font-size: 10px; }
+.turn-chip strong { margin-top: 3px; font-size: 13px; }
+.turn-chip small { margin-top: 4px; color: var(--color-muted); font-size: 10px; line-height: 1.4; }
 .turn-chip.mine { border-color: color-mix(in srgb,#dd7900 36%,var(--color-border)); background: color-mix(in srgb,#dd7900 7%,white); }
 .status-strip { display: grid; grid-template-columns: 100px 110px 110px minmax(0,1fr); overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: white; }
 .status-strip > div { min-height: 68px; padding: 13px 15px; border-right: 1px solid var(--color-border-soft); }
@@ -284,7 +323,7 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 @media (max-width: 1080px) { .play-grid { grid-template-columns: 1fr; } .side-stack { grid-template-columns: 1fr 1fr; } .side-stack > :last-child { grid-column: 1 / -1; } }
 @media (max-width: 760px) {
   .game-topbar { align-items: flex-start; flex-direction: column; }
-  .turn-chip { width: 100%; }
+  .turn-chip { width: 100%; min-width: 0; }
   .status-strip { grid-template-columns: 1fr 1fr; }
   .status-strip > div:nth-child(2) { border-right: 0; }
   .status-strip > div:nth-child(-n+2) { border-bottom: 1px solid var(--color-border-soft); }

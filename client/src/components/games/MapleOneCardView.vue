@@ -10,8 +10,9 @@
           {{ isBgmEnabled ? '배경음 끄기' : '배경음 켜기' }}
         </button>
         <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
-          <span>현재 턴</span>
-          <strong>{{ currentPlayerName }}</strong>
+          <span>{{ turnGuide.label }}</span>
+          <strong>{{ turnGuide.title }}</strong>
+          <small>{{ turnGuide.description }}</small>
         </div>
       </div>
     </header>
@@ -184,6 +185,49 @@ const currentPlayerName = computed(() => {
   return player?.nickname || state.value.currentTurnId;
 });
 
+const turnGuide = computed(() => {
+  if (state.value?.gamePhase === 'waiting') {
+    return {
+      label: '게임 준비',
+      title: '게임 시작을 기다리고 있습니다.',
+      description: `현재 ${players.value.length}명입니다. 방장이 시작하면 각자 카드를 받습니다.`,
+    };
+  }
+  if (state.value?.gamePhase === 'finished') {
+    return {
+      label: '게임 종료',
+      title: state.value.lastAction || '게임이 끝났습니다.',
+      description: '최종 순위를 확인하고 대기실로 돌아갈 수 있습니다.',
+    };
+  }
+  if (!isMyTurn.value) {
+    return {
+      label: `${currentPlayerName.value}님의 차례`,
+      title: '낼 카드를 고르고 있습니다.',
+      description: '상대가 낸 카드에 따라 진행 색상과 누적 공격이 달라질 수 있습니다.',
+    };
+  }
+  if (showColorPicker.value) {
+    return {
+      label: '내 차례 · 색상 선택 단계',
+      title: '다음 진행 색상을 선택하세요.',
+      description: '색상을 고르면 특수 카드가 공개되고 다음 플레이어는 그 색상을 따라야 합니다.',
+    };
+  }
+  if ((state.value?.pendingAttack || 0) > 0) {
+    return {
+      label: '내 차례 · 공격 대응 단계',
+      title: `공격 카드로 막거나 ${state.value.pendingAttack}장을 받으세요.`,
+      description: '대응 가능한 공격 카드를 내면 공격이 다음 플레이어에게 누적됩니다.',
+    };
+  }
+  return {
+    label: '내 차례 · 카드 내기 단계',
+    title: '낼 카드 한 장을 선택하세요.',
+    description: '현재 카드와 색상이나 숫자가 같은 카드를 내세요. 낼 카드가 없다면 한 장을 뽑으세요.',
+  };
+});
+
 const rankingPlayers = computed(() =>
   (state.value?.rankings || []).map((id) => ({ id, name: getPlayerName(id) }))
 );
@@ -340,11 +384,9 @@ onBeforeUnmount(() => {
 }
 
 .turn-chip {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  width: min(360px, 100%);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
   background: var(--color-surface);
@@ -357,7 +399,24 @@ onBeforeUnmount(() => {
 
 .turn-chip span {
   color: var(--color-muted);
+  font-size: 10px;
+}
+
+.turn-chip strong,
+.turn-chip small {
+  display: block;
+}
+
+.turn-chip strong {
+  margin-top: 3px;
   font-size: 13px;
+}
+
+.turn-chip small {
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .turn-chip.mine strong {
@@ -599,7 +658,7 @@ onBeforeUnmount(() => {
   }
 
   .turn-chip {
-    justify-content: space-between;
+    width: 100%;
   }
 
   .status-strip {
