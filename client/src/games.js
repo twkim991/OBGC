@@ -2,6 +2,7 @@ import { reactive } from 'vue';
 import { DAVINCI_CODE_PROTOCOL } from './games/davinci-code/protocol';
 import { HALLI_GALLI_PROTOCOL } from './games/halli-galli/protocol';
 import { LOVE_LETTER_PROTOCOL } from './games/love-letter/protocol';
+import { LOST_CITIES_PROTOCOL } from './games/lost-cities/protocol';
 import { ONECARD_PROTOCOL } from './games/onecard/protocol';
 import { RUMMIKUB_PROTOCOL } from './games/rummikub/protocol';
 import { SPLENDOR_PROTOCOL } from './games/splendor/protocol';
@@ -77,6 +78,16 @@ const LOCAL_GAME_VIEWS = Object.freeze([
     accent: '#0879d9',
     surface: '#f2f8fd',
     loadView: () => import('./games/splendor/View.vue'),
+  }),
+  Object.freeze({
+    id: 'lost-cities',
+    label: '로스트시티',
+    shortLabel: 'LC',
+    protocolVersion: LOST_CITIES_PROTOCOL.version,
+    quickFilter: false,
+    accent: '#a65300',
+    surface: '#fff8ef',
+    loadView: () => import('./games/lost-cities/View.vue'),
   }),
 ]);
 
