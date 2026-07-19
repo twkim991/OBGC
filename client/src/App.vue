@@ -4,13 +4,19 @@
       <div class="app-header-inner">
         <div class="app-brand" aria-label="OBGC 온라인 보드게임 카페">
           <span class="app-brand-mark" aria-hidden="true">OB</span>
-          <span>
-            <strong>OBGC</strong>
-            <small>온라인 보드게임 카페</small>
-          </span>
+          <strong>OBGC</strong>
         </div>
         <div class="app-header-actions">
-          <div class="connection-status" aria-live="polite">
+          <button
+            v-if="currentView === 'lobby'"
+            type="button"
+            class="header-create-button"
+            :disabled="!colyseusClient"
+            @click="lobbyViewRef?.openCreateModal()"
+          >
+            방 만들기
+          </button>
+          <div v-if="currentView !== 'lobby'" class="connection-status" aria-live="polite">
             <span class="connection-dot" :class="{ ready: colyseusClient }" aria-hidden="true"></span>
             {{ colyseusClient ? '게임 서버 준비됨' : '게임 서버 연결 중' }}
           </div>
@@ -34,6 +40,7 @@
 
       <LobbyView
         v-if="currentView === 'lobby'"
+        ref="lobbyViewRef"
         :colyseusClient="colyseusClient"
         :playerIdentity="playerIdentity"
         @join-table="handleJoinTable"
@@ -126,6 +133,7 @@ const handleNicknameUpdate = (nickname) => {
 };
 
 const currentView = ref('lobby'); // 'lobby', 'table', 'game'
+const lobbyViewRef = ref(null);
 const currentGameType = ref('');
 const colyseusClient = shallowRef(null);
 const roomConnection = shallowRef(null);
@@ -527,6 +535,28 @@ p {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.header-create-button {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.header-create-button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.header-create-button:disabled {
+  background: var(--color-surface-muted);
+  color: var(--color-meta);
+  border-color: var(--color-border);
 }
 
 .leave-game-button:hover {

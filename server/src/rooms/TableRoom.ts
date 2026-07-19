@@ -68,6 +68,10 @@ export class TableRoom extends Room<TableState> {
     this.state.gameType = game.id;
     this.maxClients = game.maxPlayers;
 
+    if (options?.publicRoom === false) {
+      await this.setPrivate(true);
+    }
+
     if (this.migrationSeats.total > 0) {
       await this.setPrivate(true);
       this.clock.setTimeout(async () => {
