@@ -14,6 +14,7 @@ import {
   SlidingWindowRateLimiter,
 } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import {
   createRummikubDeck,
   dealRummikubGame,
@@ -64,6 +65,7 @@ function toPublicTile(source: RummikubTile) {
 }
 
 export class RummikubRoom extends Room<RummikubState> {
+  private turnDeadline!: TurnDeadlineController;
   private pool: RummikubTile[] = [];
   private readonly hands = new Map<string, RummikubTile[]>();
   private readonly playerIds = new Map<string, string>();
@@ -74,6 +76,10 @@ export class RummikubRoom extends Room<RummikubState> {
 
   onCreate(options: unknown) {
     this.setState(new RummikubState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || RUMMIKUB_GAME.maxPlayers;
@@ -400,6 +406,7 @@ export class RummikubRoom extends Room<RummikubState> {
       clientId: 'System',
       message: '루미큐브 게임이 시작되었습니다. 첫 등록은 30점 이상이어야 합니다.',
     });
+    this.armTurnDeadline();
   }
 
   private canAct(client: Client) {
@@ -445,10 +452,52 @@ export class RummikubRoom extends Room<RummikubState> {
     );
     this.state.turnCount += 1;
     this.syncAllPrivateRacks();
+    this.armTurnDeadline();
+  }
+
+  private armTurnDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    this.turnDeadline.arm(90_000, () => this.handleTurnTimeout());
+  }
+
+  private handleTurnTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const player = this.state.players.get(sessionId);
+    if (!player) return;
+    if (this.pool.length > 0) {
+      const tile = this.pool.shift();
+      if (tile) this.getHand(sessionId).push(tile);
+      this.state.poolCount = this.pool.length;
+      this.state.consecutivePasses = 0;
+      this.state.lastAction = `${player.nickname}: 시간초과로 타일 1개 가져오기`;
+      this.syncPrivateRack(player);
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `⏱️ ${player.nickname}님의 시간이 초과되어 타일 1개를 자동으로 가져갑니다.`,
+      });
+      this.passTurn();
+      return;
+    }
+    this.state.consecutivePasses += 1;
+    this.state.lastAction = `${player.nickname}: 시간초과로 패스`;
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${player.nickname}님의 시간이 초과되어 자동으로 패스합니다.`,
+    });
+    if (this.state.consecutivePasses >= this.getActivePlayerIds().length) {
+      this.finishGame(scoreStalemate(this.hands));
+    } else {
+      this.passTurn();
+    }
   }
 
   private finishGame(result: RummikubScoreResult) {
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.winnerSessionId = result.winnerSessionId;
     this.state.rankings.clear();
     result.rankings.forEach((sessionId, index) => {

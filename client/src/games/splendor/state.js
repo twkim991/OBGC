@@ -35,6 +35,7 @@ export function projectSplendorState(state) {
     hostSessionId: state.hostSessionId,
     firstPlayerId: state.firstPlayerId,
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     gamePhase: state.gamePhase,
     actionPhase: state.actionPhase,
     turnRevision: state.turnRevision,

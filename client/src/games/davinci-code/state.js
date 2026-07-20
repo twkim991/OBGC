@@ -25,6 +25,7 @@ export function projectDavinciCodeState(state) {
     ),
     hostSessionId: state.hostSessionId,
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     gamePhase: state.gamePhase,
     turnPhase: state.turnPhase,
     turnRevision: state.turnRevision,

@@ -10,6 +10,7 @@ import {
 } from '../migration';
 import { readChatMessage, sendRoomError, SlidingWindowRateLimiter } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import { createHalliGalliDeck, dealHalliGalliCards, shuffleHalliGalliCards } from './domain/deck';
 import { buildHalliGalliRankings, getNextHalliGalliPlayerId } from './domain/engine';
 import { getExactFiveFruit, getVisibleFruitTotals } from './domain/rules';
@@ -19,6 +20,7 @@ import { HALLI_GALLI_MESSAGES, parseHalliGalliRevisionPayload } from './protocol
 import { HalliGalliPlayer, HalliGalliState } from './schema';
 
 export class HalliGalliRoom extends Room<HalliGalliState> {
+  private turnDeadline!: TurnDeadlineController;
   private decks = new Map<string, HalliGalliCard[]>();
   private faceUpPiles = new Map<string, HalliGalliCard[]>();
   private readonly playerIds = new Map<string, string>();
@@ -30,6 +32,10 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
 
   onCreate(options: unknown) {
     this.setState(new HalliGalliState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || HALLI_GALLI_GAME.maxPlayers;
@@ -125,7 +131,10 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
       return;
     }
     this.state.finalRound = active.length === 2;
-    if (this.state.currentTurnId === client.sessionId) this.advanceTurn();
+    if (this.state.currentTurnId === client.sessionId) {
+      this.advanceTurn();
+      this.armFlipDeadline();
+    }
     this.syncAllPlayers();
   }
 
@@ -164,6 +173,7 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
     this.state.lastAction = `${this.playerName(client.sessionId)}: ${this.fruitLabel(card.fruit)} ${card.count}개 공개`;
     this.advanceTurn();
     this.syncAllPlayers();
+    this.armFlipDeadline();
   }
 
   private handleRingBell(client: Client, payload: unknown) {
@@ -199,6 +209,7 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
       this.state.bellLocked = false;
       this.wrongBellRevisions.clear();
       this.syncAllPlayers();
+      this.armFlipDeadline();
       return;
     }
 
@@ -251,6 +262,7 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
     });
     this.syncAllPlayers();
     this.broadcast('chat', { clientId: 'System', message: '할리갈리가 시작되었습니다. 같은 과일이 정확히 5개 보이면 종을 누르세요!' });
+    this.armFlipDeadline();
   }
 
   private canPlay(client: Client) {
@@ -275,6 +287,33 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
     );
     // 마지막 카드로 정확히 5개가 만들어졌다면 종 반응 기회를 남긴다.
     if (!this.state.currentTurnId && !this.getExactFiveFruit()) this.finishGameByCards();
+  }
+
+  private armFlipDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase === 'playing' && !this.state.currentTurnId && this.getExactFiveFruit()) {
+      this.turnDeadline.arm(5_000, () => this.finishGameByCards());
+      return;
+    }
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    this.turnDeadline.arm(12_000, () => {
+      const client = this.clients.find(
+        (candidate) => candidate.sessionId === this.state.currentTurnId,
+      );
+      if (!client) {
+        this.advanceTurn();
+        this.armFlipDeadline();
+        return;
+      }
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `⏱️ ${this.playerName(client.sessionId)}님의 시간이 초과되어 카드를 자동으로 뒤집습니다.`,
+      });
+      this.handleFlipCard(client, { boardRevision: this.state.boardRevision });
+    });
   }
 
   private collectFaceUpCards(sessionId: string) {
@@ -307,6 +346,7 @@ export class HalliGalliRoom extends Room<HalliGalliState> {
     const rankings = buildHalliGalliRankings(playerIds, this.getOwnedCardCounts(), preferredWinnerId);
     const winnerSessionId = rankings[0] ?? preferredWinnerId;
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.currentTurnId = '';
     this.state.bellLocked = true;
     this.state.winnerSessionId = winnerSessionId;

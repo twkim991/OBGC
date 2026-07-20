@@ -24,6 +24,7 @@ export class DavinciCodeState extends Schema {
   @type('boolean') migrationReady: boolean = false;
   @type('string') hostSessionId: string = '';
   @type('string') currentTurnId: string = '';
+  @type('number') turnDeadlineAt: number = 0;
   @type('string') gamePhase: string = 'waiting';
   @type('string') turnPhase: string = 'waiting';
   @type('number') turnRevision: number = 0;

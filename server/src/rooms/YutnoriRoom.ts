@@ -42,8 +42,10 @@ import {
   YutPlayer,
 } from '../games/yutnori/schema';
 import { logRoomError, logRoomEvent } from '../games/logging';
+import { TurnDeadlineController } from '../games/turn-timeout';
 
 export class YutnoriRoom extends Room<YutnoriState> {
+  private turnDeadline!: TurnDeadlineController;
   private isReturning = false;
   private readonly chatLimiter = new SlidingWindowRateLimiter(5, 5000);
   private readonly playerIds = new Map<string, string>();
@@ -53,6 +55,10 @@ export class YutnoriRoom extends Room<YutnoriState> {
 
   onCreate(options: any) {
     this.setState(new YutnoriState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || YUTNORI_GAME.maxPlayers;
@@ -91,6 +97,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
         clientId: 'System',
         message: `${player.nickname} 방장이 윷놀이를 시작했습니다.`,
       });
+      this.armPhaseDeadline();
     });
 
     this.onMessage('chat', (client, message) => {
@@ -114,204 +121,14 @@ export class YutnoriRoom extends Room<YutnoriState> {
     });
 
     // 🎯 1. 윷 던지기
-    this.onMessage(YUTNORI_MESSAGES.throwYut, (client) => {
-      if (
-        client.sessionId !== this.state.currentTurnId ||
-        this.state.gamePhase !== 'throwing'
-      )
-        return;
-
-      const player = this.state.players.get(client.sessionId);
-      if (!player) return;
-      const activeSkill = player.activeSkill;
-      const resolution = resolveYutThrow(throwYut(), activeSkill);
-      const isNak = resolution.result.name === '낙';
-      const backwardNak =
-        resolution.throws.length > 0 &&
-        resolution.throws.every((steps) =>
-          isBackwardThrowNak(Array.from(player.pieces), steps),
-        );
-      if (!isNak && !backwardNak) {
-        this.state.remainingThrows.push(...resolution.throws);
-      }
-
-      resolution.notices.forEach((notice) => {
-        const messages = {
-          mo_magnet: '🧲 [모 확정] 우주의 기운이 윷에 스며듭니다!',
-          back_gear: '⏪ [백기어] 이번 윷은 무자비하게 뒤로 갑니다!',
-          double_cast: '👯 [복제 술법] 스택이 2배로 쌓였습니다!',
-        };
-        this.broadcast('chat', { clientId: 'System', message: messages[notice] });
-      });
-
-      if (resolution.consumeSkill) {
-        const skills = this.getSkills(player);
-        const skillIndex = skills.indexOf(activeSkill);
-        if (skillIndex !== -1) skills.splice(skillIndex, 1);
-        player.activeSkill = '';
-        player.usedSkillThisTurn = true;
-        this.syncPrivateSkills(player);
-      }
-
-      let message = `🎲 ${player.nickname}님이 [${resolution.result.name}]를 던졌습니다!`;
-
-      if (isNak || backwardNak) {
-        this.state.remainingThrows.clear();
-        this.state.gamePhase = 'throwing';
-        message += backwardNak
-          ? ' 움직일 수 있는 말이 없어 낙으로 처리됩니다.'
-          : ' 윷가락이 판 밖으로 나가 낙으로 처리됩니다.';
-        this.broadcast('chat', { clientId: 'System', message });
-        this.passTurn();
-        return;
-      } else if (resolution.keepsThrowing) {
-        message += ' 한 번 더 던지세요!! 🔥';
-      } else {
-        message += ' 이동할 말과 사용할 윷을 선택하세요.';
-        this.state.gamePhase = 'moving';
-      }
-
-      this.broadcast('chat', { clientId: 'System', message });
-    });
+    this.onMessage(YUTNORI_MESSAGES.throwYut, (client) =>
+      this.handleThrowYut(client),
+    );
 
     // 🎯 2. 스택을 소비해서 말 이동하기 (스텔스 & 거인 판정 추가!)
-    this.onMessage(YUTNORI_MESSAGES.movePiece, (client, payload: unknown) => {
-      if (
-        client.sessionId !== this.state.currentTurnId ||
-        this.state.gamePhase !== 'moving'
-      )
-        return;
-
-      const parsedPayload = parseMovePiecePayload(payload);
-      if (!parsedPayload) {
-        this.rejectRequest(client, 'INVALID_PAYLOAD', '말 이동 정보가 올바르지 않습니다.');
-        return;
-      }
-      const { pieceIndex, throwIndex } = parsedPayload;
-
-      const player = this.state.players.get(client.sessionId);
-      if (!player) return;
-      const targetPiece = player.pieces[pieceIndex];
-      const steps = this.state.remainingThrows[throwIndex];
-
-      if (!targetPiece || targetPiece.position === 99) {
-        this.rejectRequest(client, 'INVALID_PIECE', '이동할 수 없는 말입니다.');
-        return;
-      }
-      if (steps === undefined) {
-        this.rejectRequest(client, 'INVALID_THROW', '사용할 수 없는 윷 결과입니다.');
-        return;
-      }
-      if (!canMoveYutPiece(targetPiece.position, steps)) {
-        this.rejectRequest(
-          client,
-          'INVALID_BACK_DO_MOVE',
-          '스타트 위치의 말은 빽도로 움직일 수 없습니다.',
-        );
-        return;
-      }
-
-      const startPosition = targetPiece.position;
-      const movingPieces =
-        startPosition === 0
-          ? [targetPiece]
-          : player.pieces.filter((p) => p.position === startPosition);
-
-      // 👻 [스텔스 버프 부여 및 스킬 소모]
-      if (player.activeSkill === 'STEALTH_MODE') {
-        movingPieces.forEach((p) => (p.isStealth = true));
-        const skills = this.getSkills(player);
-        const skillIndex = skills.indexOf('STEALTH_MODE');
-        if (skillIndex !== -1) skills.splice(skillIndex, 1);
-        player.activeSkill = '';
-        player.usedSkillThisTurn = true;
-        this.syncPrivateSkills(player);
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `👻 [스텔스 모드] 가동! ${player.nickname}의 말이 투명해졌습니다!`,
-        });
-      }
-
-      const collision = resolveTitanCollision(
-        traceYutMove(startPosition, steps),
-        Array.from(this.state.titans),
-        movingPieces[0].isStealth,
-      );
-
-      for (let index = 0; index < collision.passedTitanCount; index++) {
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `💨 스텔스 말이 거인의 다리 사이를 무사히 통과했습니다!`,
-        });
-      }
-
-      if (collision.eaten) {
-        this.state.titans.splice(collision.consumedTitanIndex, 1);
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🩸 콰직!! 무지성거인이 ${player.nickname}의 말을 잡아먹고 사라졌습니다!`,
-        });
-      }
-
-      // 묶여있는 모든 말의 위치를 목적지로 일괄 이동 (먹혔으면 0번)
-      const endPosition = collision.endPosition;
-      movingPieces.forEach((p) => {
-        p.position = endPosition;
-        if (collision.eaten) p.isStealth = false;
-      });
-
-      // 🔥 [잡기 로직] 거인에게 안 먹히고 무사히 도착했을 때 적을 덮침
-      let caughtOpponent = false;
-      if (endPosition !== 0 && endPosition !== 99 && !collision.eaten) {
-        const capture = resolveCaptures(
-          Array.from(this.state.players.entries()).map(([sessionId, target]) => ({
-            sessionId,
-            pieces: Array.from(target.pieces),
-          })),
-          client.sessionId,
-          endPosition,
-        );
-
-        capture.captured.forEach(({ sessionId, pieceIndex }) => {
-          const capturedPiece = this.state.players.get(sessionId)?.pieces[pieceIndex];
-          if (!capturedPiece) return;
-          capturedPiece.position = 0;
-          capturedPiece.isStealth = false;
-        });
-        caughtOpponent = capture.captured.length > 0;
-
-        if (capture.stealthOverlapCount > 0) {
-          this.broadcast('chat', {
-            clientId: 'System',
-            message: `👻 스텔스 상태인 적 말을 덮쳤지만 통과해 버렸습니다! (동거 시작)`,
-          });
-        }
-      }
-
-      this.state.remainingThrows.splice(throwIndex, 1);
-
-      const hasWon = hasFinishedAllPieces(Array.from(player.pieces));
-      if (hasWon) {
-        this.state.winnerSessionId = client.sessionId;
-        this.state.gamePhase = 'finished';
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `🎉 게임 종료! ${player.nickname}님이 윷놀이를 제패했습니다!`,
-        });
-        return;
-      }
-
-      if (caughtOpponent) {
-        this.broadcast('chat', {
-          clientId: 'System',
-          message: `⚔️ 피의 숙청! ${player.nickname}님이 상대방 말을 짓밟았습니다! 보너스 턴 획득!`,
-        });
-        this.state.gamePhase = 'throwing';
-      } else if (this.state.remainingThrows.length === 0) {
-        this.state.gamePhase = 'throwing';
-        this.passTurn();
-      }
-    });
+    this.onMessage(YUTNORI_MESSAGES.movePiece, (client, payload: unknown) =>
+      this.handleMovePiece(client, payload),
+    );
 
     // 🎯 3. 대기실 복귀 로직
     this.onMessage(YUTNORI_MESSAGES.returnToTable, async (client) => {
@@ -465,6 +282,237 @@ export class YutnoriRoom extends Room<YutnoriState> {
     });
   }
 
+  private handleThrowYut(client: Client) {
+    if (
+      client.sessionId !== this.state.currentTurnId ||
+      this.state.gamePhase !== 'throwing'
+    ) return;
+
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const activeSkill = player.activeSkill;
+    const resolution = resolveYutThrow(throwYut(), activeSkill);
+    const isNak = resolution.result.name === '낙';
+    const backwardNak =
+      resolution.throws.length > 0 &&
+      resolution.throws.every((steps) =>
+        isBackwardThrowNak(Array.from(player.pieces), steps),
+      );
+    if (!isNak && !backwardNak) {
+      this.state.remainingThrows.push(...resolution.throws);
+    }
+
+    resolution.notices.forEach((notice) => {
+      const messages = {
+        mo_magnet: '🧲 [모 확정] 우주의 기운이 윷에 스며듭니다!',
+        back_gear: '⏪ [백기어] 이번 윷은 무자비하게 뒤로 갑니다!',
+        double_cast: '👯 [복제 술법] 스택이 2배로 쌓였습니다!',
+      };
+      this.broadcast('chat', { clientId: 'System', message: messages[notice] });
+    });
+
+    if (resolution.consumeSkill) {
+      const skills = this.getSkills(player);
+      const skillIndex = skills.indexOf(activeSkill);
+      if (skillIndex !== -1) skills.splice(skillIndex, 1);
+      player.activeSkill = '';
+      player.usedSkillThisTurn = true;
+      this.syncPrivateSkills(player);
+    }
+
+    let message = `🎲 ${player.nickname}님이 [${resolution.result.name}]를 던졌습니다!`;
+    if (isNak || backwardNak) {
+      this.state.remainingThrows.clear();
+      this.state.gamePhase = 'throwing';
+      message += backwardNak
+        ? ' 움직일 수 있는 말이 없어 낙으로 처리됩니다.'
+        : ' 윷가락이 판 밖으로 나가 낙으로 처리됩니다.';
+      this.broadcast('chat', { clientId: 'System', message });
+      this.passTurn();
+      return;
+    }
+    if (resolution.keepsThrowing) {
+      message += ' 한 번 더 던지세요!! 🔥';
+    } else {
+      message += ' 이동할 말과 사용할 윷을 선택하세요.';
+      this.state.gamePhase = 'moving';
+    }
+    this.broadcast('chat', { clientId: 'System', message });
+    this.armPhaseDeadline();
+  }
+
+  private handleMovePiece(client: Client, payload: unknown) {
+    if (
+      client.sessionId !== this.state.currentTurnId ||
+      this.state.gamePhase !== 'moving'
+    ) return;
+
+    const parsedPayload = parseMovePiecePayload(payload);
+    if (!parsedPayload) {
+      this.rejectRequest(client, 'INVALID_PAYLOAD', '말 이동 정보가 올바르지 않습니다.');
+      return;
+    }
+    const { pieceIndex, throwIndex } = parsedPayload;
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const targetPiece = player.pieces[pieceIndex];
+    const steps = this.state.remainingThrows[throwIndex];
+    if (!targetPiece || targetPiece.position === 99) {
+      this.rejectRequest(client, 'INVALID_PIECE', '이동할 수 없는 말입니다.');
+      return;
+    }
+    if (steps === undefined) {
+      this.rejectRequest(client, 'INVALID_THROW', '사용할 수 없는 윷 결과입니다.');
+      return;
+    }
+    if (!canMoveYutPiece(targetPiece.position, steps)) {
+      this.rejectRequest(client, 'INVALID_BACK_DO_MOVE', '스타트 위치의 말은 빽도로 움직일 수 없습니다.');
+      return;
+    }
+
+    const startPosition = targetPiece.position;
+    const movingPieces = startPosition === 0
+      ? [targetPiece]
+      : player.pieces.filter((piece) => piece.position === startPosition);
+    if (player.activeSkill === 'STEALTH_MODE') {
+      movingPieces.forEach((piece) => (piece.isStealth = true));
+      const skills = this.getSkills(player);
+      const skillIndex = skills.indexOf('STEALTH_MODE');
+      if (skillIndex !== -1) skills.splice(skillIndex, 1);
+      player.activeSkill = '';
+      player.usedSkillThisTurn = true;
+      this.syncPrivateSkills(player);
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `👻 [스텔스 모드] 가동! ${player.nickname}의 말이 투명해졌습니다!`,
+      });
+    }
+
+    const collision = resolveTitanCollision(
+      traceYutMove(startPosition, steps),
+      Array.from(this.state.titans),
+      movingPieces[0].isStealth,
+    );
+    for (let index = 0; index < collision.passedTitanCount; index++) {
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: '💨 스텔스 말이 거인의 다리 사이를 무사히 통과했습니다!',
+      });
+    }
+    if (collision.eaten) {
+      this.state.titans.splice(collision.consumedTitanIndex, 1);
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `🩸 콰직!! 무지성거인이 ${player.nickname}의 말을 잡아먹고 사라졌습니다!`,
+      });
+    }
+
+    const endPosition = collision.endPosition;
+    movingPieces.forEach((piece) => {
+      piece.position = endPosition;
+      if (collision.eaten) piece.isStealth = false;
+    });
+    let caughtOpponent = false;
+    if (endPosition !== 0 && endPosition !== 99 && !collision.eaten) {
+      const capture = resolveCaptures(
+        Array.from(this.state.players.entries()).map(([sessionId, target]) => ({
+          sessionId,
+          pieces: Array.from(target.pieces),
+        })),
+        client.sessionId,
+        endPosition,
+      );
+      capture.captured.forEach(({ sessionId, pieceIndex: capturedIndex }) => {
+        const capturedPiece = this.state.players.get(sessionId)?.pieces[capturedIndex];
+        if (!capturedPiece) return;
+        capturedPiece.position = 0;
+        capturedPiece.isStealth = false;
+      });
+      caughtOpponent = capture.captured.length > 0;
+      if (capture.stealthOverlapCount > 0) {
+        this.broadcast('chat', {
+          clientId: 'System',
+          message: '👻 스텔스 상태인 적 말을 덮쳤지만 통과해 버렸습니다! (동거 시작)',
+        });
+      }
+    }
+
+    this.state.remainingThrows.splice(throwIndex, 1);
+    if (hasFinishedAllPieces(Array.from(player.pieces))) {
+      this.state.winnerSessionId = client.sessionId;
+      this.state.gamePhase = 'finished';
+      this.turnDeadline?.clear();
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `🎉 게임 종료! ${player.nickname}님이 윷놀이를 제패했습니다!`,
+      });
+      return;
+    }
+    if (caughtOpponent) {
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `⚔️ 피의 숙청! ${player.nickname}님이 상대방 말을 짓밟았습니다! 보너스 턴 획득!`,
+      });
+      this.state.gamePhase = 'throwing';
+    } else if (this.state.remainingThrows.length === 0) {
+      this.state.gamePhase = 'throwing';
+      this.passTurn();
+      return;
+    }
+    this.armPhaseDeadline();
+  }
+
+  private armPhaseDeadline() {
+    if (!this.turnDeadline) return;
+    if (
+      !this.state.currentTurnId ||
+      this.state.gamePhase !== 'throwing' &&
+      this.state.gamePhase !== 'moving'
+    ) {
+      this.turnDeadline.clear();
+      return;
+    }
+    this.turnDeadline.arm(
+      this.state.gamePhase === 'throwing' ? 12_000 : 30_000,
+      () => this.handlePhaseTimeout(),
+    );
+  }
+
+  private handlePhaseTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const client = this.clients.find((candidate) => candidate.sessionId === sessionId);
+    const player = this.state.players.get(sessionId);
+    if (!client || !player) {
+      this.passTurn();
+      return;
+    }
+    if (this.state.gamePhase === 'throwing') {
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `⏱️ ${player.nickname}님의 시간이 초과되어 윷을 자동으로 던집니다.`,
+      });
+      this.handleThrowYut(client);
+      return;
+    }
+    for (let throwIndex = 0; throwIndex < this.state.remainingThrows.length; throwIndex++) {
+      const steps = this.state.remainingThrows[throwIndex];
+      const pieceIndex = player.pieces.findIndex((piece) =>
+        piece.position !== 99 && canMoveYutPiece(piece.position, steps),
+      );
+      if (pieceIndex >= 0) {
+        this.broadcast('chat', {
+          clientId: 'System',
+          message: `⏱️ ${player.nickname}님의 시간이 초과되어 말을 자동으로 이동합니다.`,
+        });
+        this.handleMovePiece(client, { pieceIndex, throwIndex });
+        return;
+      }
+    }
+    this.state.remainingThrows.clear();
+    this.state.gamePhase = 'throwing';
+    this.passTurn();
+  }
+
   onAuth(client: Client, options: unknown) {
     const authorized =
       this.migrationSeats.total > 0 &&
@@ -564,6 +612,7 @@ export class YutnoriRoom extends Room<YutnoriState> {
       p.usedSkillThisTurn = false;
       p.activeSkill = '';
     });
+    this.armPhaseDeadline();
   }
 
   private transferHost() {

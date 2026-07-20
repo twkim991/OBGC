@@ -39,6 +39,7 @@ import {
   parsePlayCardPayload,
 } from '../games/onecard/protocol';
 import { logRoomError, logRoomEvent } from '../games/logging';
+import { TurnDeadlineController } from '../games/turn-timeout';
 import {
   createDeck as createOneCardDeck,
   shuffle,
@@ -65,6 +66,7 @@ function getTopCard(state: MapleOneCardState): OneCardCard | null {
 }
 
 export class MapleOneCardRoom extends Room<MapleOneCardState> {
+  private turnDeadline!: TurnDeadlineController;
   private isReturning = false;
   private deck: Card[] = [];
   private readonly hands = new Map<string, Card[]>();
@@ -75,6 +77,10 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   onCreate(options: any) {
     this.setState(new MapleOneCardState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || MAPLE_ONE_CARD_GAME.maxPlayers;
@@ -188,6 +194,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
         this.checkBankruptAll();
         this.checkForcedGameEnd();
         this.syncAllPrivateHands();
+        if (this.state.gamePhase === 'playing') this.armTurnDeadline();
       },
     );
 
@@ -429,6 +436,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
       }`,
     });
     this.syncAllPrivateHands();
+    this.armTurnDeadline();
   }
 
   // --- 카드 효과 적용 ---
@@ -571,6 +579,39 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     });
     this.state.turnCount += 1;
     this.syncAllPrivateHands();
+    this.armTurnDeadline();
+  }
+
+  private armTurnDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    this.turnDeadline.arm(20_000, () => this.handleTurnTimeout());
+  }
+
+  private handleTurnTimeout() {
+    const player = this.state.players.get(this.state.currentTurnId);
+    if (!player || !player.alive || player.bankrupt) {
+      this.passTurn();
+      return;
+    }
+    const drawCount = this.state.pendingAttack > 0 ? this.state.pendingAttack : 1;
+    this.drawCards(player, drawCount);
+    if (this.state.pendingAttack > 0) {
+      this.state.pendingAttack = 0;
+      const top = getTopCard(this.state);
+      if (top && top.color !== 'purple') this.state.currentColor = top.color;
+    }
+    this.state.lastAction = `${player.nickname}: 시간초과로 ${drawCount}장 받기`;
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${player.nickname}님의 시간이 초과되어 카드 ${drawCount}장을 자동으로 받고 턴을 넘깁니다.`,
+    });
+    this.checkBankrupt(player);
+    this.passTurn();
+    this.checkForcedGameEnd();
   }
 
   private getAlivePlayers() {
@@ -614,6 +655,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   private finishGame(winnerSessionId: string) {
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.winnerSessionId = winnerSessionId;
     this.state.rankings.clear();
 

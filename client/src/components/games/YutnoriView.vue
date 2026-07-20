@@ -6,6 +6,7 @@
         <h1>초능력 윷놀이</h1>
       </div>
       <div class="topbar-actions">
+        <TurnTimer :deadline-at="gameState?.turnDeadlineAt || 0" :active="Boolean(gameState?.turnDeadlineAt)" :is-mine="isMyTurn" />
         <div class="turn-status" :class="{ mine: isMyTurn }" role="status">
           <span>{{ turnGuide.label }}</span>
           <strong>{{ turnGuide.title }}</strong>
@@ -67,6 +68,7 @@
 import { ref, computed, watch } from 'vue';
 import { showActionAlert, showRoomErrorAlert } from '../../game-alerts';
 import GameChatPanel from './shared/GameChatPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import YutBoard from './yutnori/YutBoard.vue';
 import YutResultModal from './yutnori/YutResultModal.vue';
 import YutTurnControls from './yutnori/YutTurnControls.vue';

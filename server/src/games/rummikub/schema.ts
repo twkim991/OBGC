@@ -28,6 +28,7 @@ export class RummikubState extends Schema {
   @type('boolean') migrationReady: boolean = false;
   @type('string') hostSessionId: string = '';
   @type('string') currentTurnId: string = '';
+  @type('number') turnDeadlineAt: number = 0;
   @type('string') gamePhase: string = 'waiting';
   @type('number') poolCount: number = 0;
   @type('number') boardRevision: number = 0;
@@ -37,4 +38,3 @@ export class RummikubState extends Schema {
   @type(['string']) rankings = new ArraySchema<string>();
   @type('string') lastAction: string = '';
 }
-

@@ -38,6 +38,7 @@ export function projectLostCitiesState(state) {
     ),
     hostSessionId: state.hostSessionId,
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     roundStarterId: state.roundStarterId,
     gamePhase: state.gamePhase,
     actionPhase: state.actionPhase,
@@ -53,4 +54,3 @@ export function projectLostCitiesState(state) {
     lastAction: state.lastAction,
   };
 }
-

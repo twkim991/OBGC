@@ -43,6 +43,7 @@ export class SplendorState extends Schema {
   @type('string') hostSessionId: string = '';
   @type('string') firstPlayerId: string = '';
   @type('string') currentTurnId: string = '';
+  @type('number') turnDeadlineAt: number = 0;
   @type('string') gamePhase: string = 'waiting';
   @type('string') actionPhase: string = 'waiting';
   @type('number') turnRevision: number = 0;

@@ -15,6 +15,7 @@ import {
   SlidingWindowRateLimiter,
 } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import {
   createLostCitiesDeck,
   dealLostCitiesHands,
@@ -60,6 +61,7 @@ const createEmptyDiscardPiles = () =>
   >;
 
 export class LostCitiesRoom extends Room<LostCitiesState> {
+  private turnDeadline!: TurnDeadlineController;
   private deck: LostCitiesCard[] = [];
   private hands = new Map<string, LostCitiesCard[]>();
   private routes = new Map<string, LostCitiesRoutes>();
@@ -72,6 +74,10 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
 
   onCreate(options: unknown) {
     this.setState(new LostCitiesState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || LOST_CITIES_GAME.maxPlayers;
@@ -296,6 +302,7 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
     this.state.actionPhase = 'draw';
     this.state.turnRevision += 1;
     this.sendPrivateHand(client);
+    this.armActionDeadline();
   }
 
   private handleDrawCard(client: Client, payload: unknown) {
@@ -362,6 +369,7 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
     );
     this.state.actionPhase = 'play';
     this.state.blockedDiscardColor = '';
+    this.armActionDeadline();
   }
 
   private handleNextRound(client: Client) {
@@ -422,6 +430,7 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
       this.state.roundCount
     }라운드를 시작합니다.`;
     this.syncAllPrivateHands();
+    this.armActionDeadline();
   }
 
   private finishRound() {
@@ -449,6 +458,7 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
     }
     this.state.gamePhase = 'round_result';
     this.state.lastAction = `${this.state.roundCount}라운드가 종료되었습니다.`;
+    this.armActionDeadline();
   }
 
   private finishGame() {
@@ -463,6 +473,7 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
       if (player) player.rank = index + 1;
     });
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.actionPhase = 'finished';
     this.state.lastAction = `${this.state.winnerSessionIds
       .map((id) => this.playerName(id))
@@ -483,10 +494,72 @@ export class LostCitiesRoom extends Room<LostCitiesState> {
       if (player) player.rank = index + 1;
     });
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.actionPhase = 'finished';
     this.state.lastAction = remainingIds.length
       ? `${this.playerName(remainingIds[0])}님이 상대 이탈로 승리했습니다.`
       : '게임이 종료되었습니다.';
+  }
+
+  private armActionDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase === 'round_result') {
+      this.turnDeadline.arm(20_000, () => {
+        const starterId = selectLostCitiesRoundStarter(
+          this.scoreEntries(),
+          this.state.roundStarterId,
+        );
+        this.state.roundCount += 1;
+        this.state.roundStarterId = starterId;
+        this.broadcast('chat', {
+          clientId: 'System',
+          message: '⏱️ 라운드 전환 시간이 끝나 다음 라운드를 자동으로 시작합니다.',
+        });
+        this.setupRound(starterId);
+      });
+      return;
+    }
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    this.turnDeadline.arm(
+      this.state.actionPhase === 'draw' ? 15_000 : 30_000,
+      () => this.handleActionTimeout(),
+    );
+  }
+
+  private handleActionTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const client = this.clients.find((candidate) => candidate.sessionId === sessionId);
+    if (!client) {
+      this.finishByForfeit(sessionId);
+      return;
+    }
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${this.playerName(sessionId)}님의 시간이 초과되어 행동을 자동으로 처리합니다.`,
+    });
+    if (this.state.actionPhase === 'draw') {
+      this.handleDrawCard(client, {
+        source: 'deck',
+        color: '',
+        turnRevision: this.state.turnRevision,
+      });
+      return;
+    }
+    const card = [...(this.hands.get(sessionId) ?? [])].sort(
+      (left, right) => left.value - right.value,
+    )[0];
+    if (!card) {
+      this.finishByForfeit(sessionId);
+      return;
+    }
+    this.handlePlayCard(client, {
+      cardId: card.id,
+      destination: 'discard',
+      turnRevision: this.state.turnRevision,
+    });
   }
 
   private canAct(client: Client, actionPhase: 'play' | 'draw') {

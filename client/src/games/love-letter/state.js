@@ -21,6 +21,7 @@ export function projectLoveLetterState(state) {
     ),
     hostSessionId: state.hostSessionId,
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     gamePhase: state.gamePhase,
     actionPhase: state.actionPhase,
     turnRevision: state.turnRevision,

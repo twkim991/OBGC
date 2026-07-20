@@ -50,6 +50,7 @@ export class LostCitiesState extends Schema {
   @type('boolean') migrationReady = false;
   @type('string') hostSessionId = '';
   @type('string') currentTurnId = '';
+  @type('number') turnDeadlineAt = 0;
   @type('string') roundStarterId = '';
   @type('string') gamePhase = 'waiting';
   @type('string') actionPhase = 'waiting';

@@ -6,6 +6,7 @@
         <h1>루미큐브</h1>
         <p>조합을 완성하고, 보드를 재구성해 가장 먼저 패를 비우세요.</p>
       </div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ turnGuide.label }}</span>
         <strong>{{ turnGuide.title }}</strong>
@@ -123,6 +124,7 @@ import { RUMMIKUB_PROTOCOL } from '../../games/rummikub/protocol';
 import { projectRummikubState } from '../../games/rummikub/state';
 import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import RummikubBoard from './rummikub/RummikubBoard.vue';
 import RummikubPlayerPanel from './rummikub/RummikubPlayerPanel.vue';
 import RummikubRack from './rummikub/RummikubRack.vue';

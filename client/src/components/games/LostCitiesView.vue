@@ -6,6 +6,7 @@
         <h1>로스트시티</h1>
         <p>탐험을 시작했다면 더 큰 숫자만 놓을 수 있습니다. 위험을 감수해 가장 값진 원정을 완성하세요.</p>
       </div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ turnStatus.label }}</span><strong>{{ turnStatus.title }}</strong><small>{{ turnStatus.description }}</small>
       </div>
@@ -155,6 +156,7 @@ import { showRoomErrorAlert } from '../../game-alerts';
 import { LOST_CITIES_PROTOCOL } from '../../games/lost-cities/protocol';
 import { LOST_CITIES_COLORS, projectLostCitiesState } from '../../games/lost-cities/state';
 import ActionGuard from './shared/ActionGuard.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import LostCitiesCard from './lost-cities/LostCitiesCard.vue';
 import LostCitiesExpedition from './lost-cities/LostCitiesExpedition.vue';
 import LostCitiesResultModal from './lost-cities/LostCitiesResultModal.vue';

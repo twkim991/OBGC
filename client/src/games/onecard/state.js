@@ -29,6 +29,7 @@ export function projectOneCardState(state) {
     ),
     discardPile: Array.from(state.discardPile ?? [], projectCard).filter(Boolean),
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     direction: state.direction,
     gamePhase: state.gamePhase,
     currentColor: state.currentColor,

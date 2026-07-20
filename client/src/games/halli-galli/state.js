@@ -24,6 +24,7 @@ export function projectHalliGalliState(state) {
     ),
     hostSessionId: state.hostSessionId,
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     gamePhase: state.gamePhase,
     boardRevision: state.boardRevision,
     turnCount: state.turnCount,

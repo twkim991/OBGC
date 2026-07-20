@@ -20,6 +20,7 @@ export function projectYutnoriState(state) {
       ])
     ),
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     remainingThrows: Array.from(state.remainingThrows ?? []),
     gamePhase: state.gamePhase,
     winnerSessionId: state.winnerSessionId,

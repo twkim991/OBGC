@@ -11,6 +11,7 @@ import {
 } from '../migration';
 import { readChatMessage, sendRoomError, SlidingWindowRateLimiter } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import { createSplendorCards, createSplendorNobles } from './domain/cards';
 import { getNextSplendorPlayerId, shouldFinishSplendorGame } from './domain/engine';
 import {
@@ -61,6 +62,7 @@ import {
 } from './schema';
 
 export class SplendorRoom extends Room<SplendorState> {
+  private turnDeadline!: TurnDeadlineController;
   private decks = new Map<SplendorTier, SplendorCard[]>();
   private reservedCards = new Map<string, SplendorCard[]>();
   private readonly playerIds = new Map<string, string>();
@@ -71,6 +73,10 @@ export class SplendorRoom extends Room<SplendorState> {
 
   onCreate(options: unknown) {
     this.setState(new SplendorState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || SPLENDOR_GAME.maxPlayers;
@@ -285,6 +291,7 @@ export class SplendorRoom extends Room<SplendorState> {
       eligible.forEach((noble) => this.state.eligibleNobleIds.push(noble.id));
       this.state.actionPhase = 'choose_noble';
       this.state.turnRevision += 1;
+      this.armActionDeadline();
     } else {
       this.completeTurn();
     }
@@ -353,12 +360,14 @@ export class SplendorRoom extends Room<SplendorState> {
     this.state.lastAction = '첫 플레이어가 행동을 선택합니다.';
     this.syncDeckCounts();
     this.broadcast('chat', { clientId: 'System', message: '스플렌더가 시작되었습니다. 한 턴에 한 가지 행동을 선택하세요.' });
+    this.armActionDeadline();
   }
 
   private finishOrRequestTokenReturn(player: SplendorPlayer) {
     if (getSplendorTokenTotal(this.readResources(player.tokens)) > SPLENDOR_MAX_TOKENS) {
       this.state.actionPhase = 'return_tokens';
       this.state.turnRevision += 1;
+      this.armActionDeadline();
       return;
     }
     this.completeTurn();
@@ -387,6 +396,7 @@ export class SplendorRoom extends Room<SplendorState> {
     this.state.eligibleNobleIds.clear();
     this.state.turnRevision += 1;
     this.state.turnCount += 1;
+    this.armActionDeadline();
   }
 
   private finishGame(forcedWinnerIds?: string[]) {
@@ -395,6 +405,7 @@ export class SplendorRoom extends Room<SplendorState> {
     const rankings = getSplendorRankings(candidates);
     const winnerIds = forcedWinnerIds ?? getSplendorWinnerIds(candidates);
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.actionPhase = 'finished';
     this.state.currentTurnId = '';
     this.state.winnerSessionIds.clear();
@@ -412,6 +423,132 @@ export class SplendorRoom extends Room<SplendorState> {
     });
     this.state.lastAction = `${winnerIds.map((id) => this.playerName(id)).join(', ')} 최종 승리`;
     this.broadcast('chat', { clientId: 'System', message: `${winnerIds.map((id) => this.playerName(id)).join(', ')}님이 스플렌더에서 승리했습니다!` });
+  }
+
+  private armActionDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    const delayMs = this.state.actionPhase === 'main' ? 45_000 : 15_000;
+    this.turnDeadline.arm(delayMs, () => this.handleActionTimeout());
+  }
+
+  private handleActionTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const client = this.clients.find((candidate) => candidate.sessionId === sessionId);
+    const player = this.state.players.get(sessionId);
+    if (!client || !player) {
+      this.advanceTurn();
+      return;
+    }
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${player.nickname}님의 시간이 초과되어 행동을 자동으로 처리합니다.`,
+    });
+    if (this.state.actionPhase === 'return_tokens') {
+      let excess = Math.max(
+        0,
+        getSplendorTokenTotal(this.readResources(player.tokens)) -
+          SPLENDOR_MAX_TOKENS,
+      );
+      const returned = createEmptyTokenCounts();
+      for (const color of [...SPLENDOR_COLORS, 'gold' as const]) {
+        const count = Math.min(player.tokens[color], excess);
+        returned[color] = count;
+        excess -= count;
+      }
+      this.handleReturnTokens(client, {
+        returned,
+        turnRevision: this.state.turnRevision,
+      });
+      return;
+    }
+    if (this.state.actionPhase === 'choose_noble') {
+      const nobleId = this.state.eligibleNobleIds[0];
+      if (nobleId) {
+        this.handleChooseNoble(client, {
+          nobleId,
+          turnRevision: this.state.turnRevision,
+        });
+      } else {
+        this.completeTurn();
+      }
+      return;
+    }
+
+    const reserved = this.reservedCards.get(sessionId) ?? [];
+    const affordableReserved = reserved.find((card) =>
+      Boolean(
+        getSplendorPayment(
+          card,
+          this.readResources(player.tokens),
+          this.readGemResources(player.bonuses),
+        ),
+      ),
+    );
+    if (affordableReserved) {
+      this.handlePurchaseCard(client, {
+        source: 'reserved',
+        cardId: affordableReserved.id,
+        turnRevision: this.state.turnRevision,
+      });
+      return;
+    }
+    for (const tier of [1, 2, 3] as SplendorTier[]) {
+      const affordable = this.getMarket(tier).find((candidate) =>
+        Boolean(
+          getSplendorPayment(
+            this.fromPublicCard(candidate),
+            this.readResources(player.tokens),
+            this.readGemResources(player.bonuses),
+          ),
+        ),
+      );
+      if (affordable) {
+        this.handlePurchaseCard(client, {
+          source: 'market',
+          cardId: affordable.id,
+          turnRevision: this.state.turnRevision,
+        });
+        return;
+      }
+    }
+    if (reserved.length < SPLENDOR_MAX_RESERVED) {
+      for (const tier of [1, 2, 3] as SplendorTier[]) {
+        const card = this.getMarket(tier)[0];
+        if (card) {
+          this.handleReserveCard(client, {
+            source: 'market',
+            cardId: card.id,
+            tier,
+            turnRevision: this.state.turnRevision,
+          });
+          return;
+        }
+      }
+    }
+    const availableColors = SPLENDOR_COLORS.filter(
+      (color) => this.state.bank[color] > 0,
+    );
+    const selection = createEmptyGemCounts();
+    if (availableColors.length >= 3) {
+      availableColors.slice(0, 3).forEach((color) => (selection[color] = 1));
+    } else {
+      const doubleColor = SPLENDOR_COLORS.find(
+        (color) => this.state.bank[color] >= 4,
+      );
+      if (doubleColor) selection[doubleColor] = 2;
+    }
+    if (validateSplendorGemTake(selection, this.readResources(this.state.bank))) {
+      this.handleTakeGems(client, {
+        selection,
+        turnRevision: this.state.turnRevision,
+      });
+      return;
+    }
+    this.advanceTurn();
   }
 
   private acquireNoble(player: SplendorPlayer, nobleId: string) {

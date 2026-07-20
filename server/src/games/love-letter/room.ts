@@ -10,6 +10,7 @@ import {
 } from '../migration';
 import { readChatMessage, sendRoomError, SlidingWindowRateLimiter } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import { createLoveLetterDeck, shuffleLoveLetterCards } from './domain/deck';
 import { buildLoveLetterRankings, getNextLoveLetterPlayerId } from './domain/engine';
 import {
@@ -34,6 +35,7 @@ const TARGET_CHARACTERS = new Set<LoveLetterCharacter>([
 ]);
 
 export class LoveLetterRoom extends Room<LoveLetterState> {
+  private turnDeadline!: TurnDeadlineController;
   private deck: LoveLetterCard[] = [];
   private setAsideCard: LoveLetterCard | null = null;
   private hands = new Map<string, LoveLetterCard[]>();
@@ -47,6 +49,10 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
 
   onCreate(options: unknown) {
     this.setState(new LoveLetterState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || LOVE_LETTER_GAME.maxPlayers;
@@ -222,6 +228,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     this.syncPublicCounts();
     this.syncAllPrivateHands();
     if (!pending) this.completeTurn();
+    else this.armActionDeadline();
   }
 
   private handleDrawCard(client: Client, payload: unknown) {
@@ -241,6 +248,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     this.state.lastAction = `${this.playerName(client.sessionId)} 님이 카드를 뽑았습니다.`;
     this.syncPublicCounts();
     this.syncAllPrivateHands();
+    this.armActionDeadline();
   }
 
   private applyCardEffect(actorId: string, card: LoveLetterCard, targetId: string, guessed: LoveLetterCharacter | '') {
@@ -407,6 +415,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     this.state.turnRevision += 1;
     this.syncPublicCounts();
     this.syncAllPrivateHands();
+    this.armActionDeadline();
   }
 
   private completeTurn() {
@@ -454,6 +463,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     this.state.gamePhase = 'round_result';
     this.syncPublicCounts();
     this.syncAllPrivateHands();
+    this.armActionDeadline();
   }
 
   private finishGame(winnerIds: string[]) {
@@ -461,6 +471,7 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     const favors = new Map(players.map((player) => [player.sessionId, player.favorTokens]));
     const rankings = buildLoveLetterRankings(players.map((player) => player.sessionId), favors);
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.actionPhase = 'finished';
     this.state.winnerSessionIds.clear();
     winnerIds.forEach((id) => this.state.winnerSessionIds.push(id));
@@ -472,6 +483,89 @@ export class LoveLetterRoom extends Room<LoveLetterState> {
     });
     this.state.lastAction = `${winnerIds.map((id) => this.playerName(id)).join(', ')} 최종 승리`;
     this.broadcast('chat', { clientId: 'System', message: `${winnerIds.map((id) => this.playerName(id)).join(', ')} 님이 러브레터에서 승리했습니다!` });
+  }
+
+  private armActionDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase === 'round_result') {
+      this.turnDeadline.arm(20_000, () => {
+        this.broadcast('chat', {
+          clientId: 'System',
+          message: '⏱️ 라운드 전환 시간이 끝나 다음 라운드를 자동으로 시작합니다.',
+        });
+        this.startRound();
+      });
+      return;
+    }
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    const delayMs =
+      this.state.actionPhase === 'draw'
+        ? 10_000
+        : this.state.actionPhase === 'chancellor'
+          ? 20_000
+          : 30_000;
+    this.turnDeadline.arm(delayMs, () => this.handleActionTimeout());
+  }
+
+  private handleActionTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const client = this.clients.find((candidate) => candidate.sessionId === sessionId);
+    if (!client) {
+      this.advanceTurn();
+      return;
+    }
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${this.playerName(sessionId)}님의 시간이 초과되어 행동을 자동으로 처리합니다.`,
+    });
+    if (this.state.actionPhase === 'draw') {
+      this.handleDrawCard(client, { turnRevision: this.state.turnRevision });
+      return;
+    }
+    if (this.state.actionPhase === 'chancellor') {
+      const hand = this.hands.get(sessionId) ?? [];
+      const keep = [...hand].sort((left, right) => right.value - left.value)[0];
+      if (!keep) return this.completeTurn();
+      this.handleResolveChancellor(client, {
+        keepCardId: keep.id,
+        returnCardIds: hand.filter((card) => card.id !== keep.id).map((card) => card.id),
+        turnRevision: this.state.turnRevision,
+      });
+      return;
+    }
+
+    const hand = this.hands.get(sessionId) ?? [];
+    const card = mustPlayCountess(hand)
+      ? hand.find((candidate) => candidate.character === 'countess')
+      : [...hand].sort((left, right) => left.value - right.value)[0];
+    if (!card) return this.completeTurn();
+    const activeIds = this.getActivePlayers().map((player) => player.sessionId);
+    const protectedIds = new Set(
+      this.getActivePlayers()
+        .filter((player) => player.protected)
+        .map((player) => player.sessionId),
+    );
+    const targetSessionId = [
+      ...activeIds.filter((id) => id !== sessionId),
+      sessionId,
+    ].find((id) =>
+      canChooseLoveLetterTarget(
+        sessionId,
+        id,
+        card.character,
+        activeIds,
+        protectedIds,
+      ),
+    ) ?? '';
+    this.handlePlayCard(client, {
+      cardId: card.id,
+      targetSessionId,
+      guessedCharacter: card.character === 'guard' ? 'priest' : '',
+      turnRevision: this.state.turnRevision,
+    });
   }
 
   private eliminatePlayer(sessionId: string, revealHand = true) {

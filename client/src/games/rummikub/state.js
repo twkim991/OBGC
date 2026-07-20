@@ -27,6 +27,7 @@ export function projectRummikubState(state) {
       tiles: Array.from(meld.tiles ?? [], projectTile),
     })),
     currentTurnId: state.currentTurnId,
+    turnDeadlineAt: state.turnDeadlineAt || 0,
     hostSessionId: state.hostSessionId,
     gamePhase: state.gamePhase,
     poolCount: state.poolCount,
@@ -38,4 +39,3 @@ export function projectRummikubState(state) {
     lastAction: state.lastAction,
   };
 }
-

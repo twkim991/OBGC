@@ -2,6 +2,7 @@
   <div class="splendor-game">
     <header class="topbar">
       <div><p class="eyebrow">RENAISSANCE GEM TRADE</p><h1>스플렌더</h1></div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-status" :class="{mine:isMyTurn}" role="status"><span>{{ turnStatus.label }}</span><strong>{{ turnStatus.title }}</strong><small>{{ turnStatus.description }}</small></div>
     </header>
 
@@ -101,6 +102,7 @@ import {SPLENDOR_PROTOCOL} from '../../games/splendor/protocol';
 import {projectSplendorState} from '../../games/splendor/state';
 import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import SplendorCard from './splendor/SplendorCard.vue';
 import SplendorGem from './splendor/SplendorGem.vue';
 import SplendorNoble from './splendor/SplendorNoble.vue';

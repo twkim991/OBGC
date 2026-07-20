@@ -6,6 +6,7 @@
         <h1>러브레터</h1>
         <p>한 장의 손패와 눈앞의 행동을 기억해 마지막까지 공주의 마음에 닿으세요.</p>
       </div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ turnStatus.label }}</span><strong>{{ turnStatus.title }}</strong><small>{{ turnStatus.description }}</small>
       </div>
@@ -179,6 +180,7 @@ import { showRoomErrorAlert } from '../../game-alerts';
 import { LOVE_LETTER_PROTOCOL } from '../../games/love-letter/protocol';
 import { projectLoveLetterState } from '../../games/love-letter/state';
 import ActionGuard from './shared/ActionGuard.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import LoveLetterCard from './love-letter/LoveLetterCard.vue';
 import LoveLetterPlayerSeat from './love-letter/LoveLetterPlayerSeat.vue';
 import LoveLetterResultModal from './love-letter/LoveLetterResultModal.vue';

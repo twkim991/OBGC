@@ -6,6 +6,7 @@
         <h1>메이플 원카드</h1>
       </div>
       <div class="topbar-actions">
+        <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
         <label class="volume-control">
           <span>배경음</span>
           <input
@@ -114,6 +115,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { showRoomErrorAlert } from '../../game-alerts';
 import ActionGuard from './shared/ActionGuard.vue';
 import GameChatPanel from './shared/GameChatPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import OneCardColorPicker from './onecard/OneCardColorPicker.vue';
 import OneCardHandPanel from './onecard/OneCardHandPanel.vue';
 import OneCardPlayerPanel from './onecard/OneCardPlayerPanel.vue';

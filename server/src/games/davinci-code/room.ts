@@ -14,6 +14,7 @@ import {
   SlidingWindowRateLimiter,
 } from '../protocol';
 import { createRematchTable } from '../rematch';
+import { TurnDeadlineController } from '../turn-timeout';
 import {
   createDavinciDeck,
   drawDavinciCode,
@@ -55,6 +56,7 @@ const GUESS_ERROR_MESSAGES = {
 } as const;
 
 export class DavinciCodeRoom extends Room<DavinciCodeState> {
+  private turnDeadline!: TurnDeadlineController;
   private pool: DavinciTile[] = [];
   private readonly codes = new Map<string, DavinciCodeTile[]>();
   private readonly pendingDraws = new Map<string, DavinciTile>();
@@ -67,6 +69,10 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
 
   onCreate(options: unknown) {
     this.setState(new DavinciCodeState());
+    this.turnDeadline = new TurnDeadlineController(
+      (callback, delayMs) => void this.clock.setTimeout(callback, delayMs),
+      (deadlineAt) => (this.state.turnDeadlineAt = deadlineAt),
+    );
     this.setSeatReservationTime(MIGRATION_SEAT_SECONDS);
     this.migrationSeats = new MigrationSeatRegistry(options);
     this.maxClients = this.migrationSeats.total || DAVINCI_CODE_GAME.maxPlayers;
@@ -180,6 +186,7 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
       const player = this.state.players.get(client.sessionId);
       this.state.lastAction = `${player?.nickname ?? client.sessionId}: ${this.colorLabel(tile.color)} 타일 선택`;
       if (player) this.syncPrivateCode(player);
+      this.armPhaseDeadline();
     });
 
     this.onMessage(DAVINCI_CODE_MESSAGES.guessTile, (client, payload: unknown) => {
@@ -232,6 +239,7 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
             this.finishGame();
           }
         }
+        if (this.state.gamePhase === 'playing') this.armPhaseDeadline();
         return;
       }
 
@@ -431,6 +439,7 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
       clientId: 'System',
       message: `다빈치 코드가 시작되었습니다. 시작 타일 색상을 ${this.initialCodeSize}개 선택하세요.`,
     });
+    this.armPhaseDeadline();
   }
 
   private beginFirstTurn() {
@@ -452,6 +461,91 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
     this.state.turnPhase = this.pool.length > 0 ? 'draw' : 'guess';
     this.state.turnRevision += 1;
     this.syncAllPrivateCodes();
+    this.armPhaseDeadline();
+  }
+
+  private armPhaseDeadline() {
+    if (!this.turnDeadline) return;
+    if (this.state.gamePhase === 'setup') {
+      this.turnDeadline.arm(45_000, () => this.handleSetupTimeout());
+      return;
+    }
+    if (this.state.gamePhase !== 'playing' || !this.state.currentTurnId) {
+      this.turnDeadline.clear();
+      return;
+    }
+    const delayMs =
+      this.state.turnPhase === 'draw'
+        ? 15_000
+        : this.state.turnPhase === 'decision'
+          ? 10_000
+          : 30_000;
+    this.turnDeadline.arm(delayMs, () => this.handlePhaseTimeout());
+  }
+
+  private handleSetupTimeout() {
+    const requiredCount = this.initialCodeSize;
+    this.getActivePlayers()
+      .filter((player) => !player.setupComplete)
+      .forEach((player) => {
+        const colors: DavinciColor[] = [];
+        for (let index = 0; index < requiredCount; index += 1) {
+          const lightCount = this.pool.filter((tile) => tile.color === 'light').length;
+          const darkCount = this.pool.filter((tile) => tile.color === 'dark').length;
+          colors.push(lightCount >= darkCount ? 'light' : 'dark');
+        }
+        const code = drawDavinciCode(this.pool, colors);
+        if (!code) return;
+        this.codes.set(player.sessionId, sortDavinciCode(code));
+        player.setupComplete = true;
+        this.updatePublicCode(player);
+        this.syncPrivateCode(player);
+      });
+    this.updatePoolCounts();
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: '⏱️ 준비 시간이 끝나 미선택 시작 타일을 자동으로 배분했습니다.',
+    });
+    this.beginFirstTurn();
+  }
+
+  private handlePhaseTimeout() {
+    const sessionId = this.state.currentTurnId;
+    const player = this.state.players.get(sessionId);
+    if (!player) {
+      this.advanceTurn();
+      return;
+    }
+    if (this.state.turnPhase === 'draw') {
+      const color = this.pool[0]?.color;
+      const tile = color ? drawDavinciTile(this.pool, color) : null;
+      if (!tile) {
+        this.state.turnPhase = 'guess';
+        this.state.turnRevision += 1;
+        this.armPhaseDeadline();
+        return;
+      }
+      this.pendingDraws.set(sessionId, tile);
+      this.state.drawnTileColor = tile.color;
+      this.state.turnPhase = 'guess';
+      this.state.turnRevision += 1;
+      this.state.lastAction = `${player.nickname}: 시간초과로 ${this.colorLabel(tile.color)} 타일 자동 선택`;
+      this.updatePoolCounts();
+      this.syncPrivateCode(player);
+      this.broadcast('chat', {
+        clientId: 'System',
+        message: `⏱️ ${player.nickname}님의 시간이 초과되어 타일을 자동으로 선택했습니다.`,
+      });
+      this.armPhaseDeadline();
+      return;
+    }
+    const revealPending = this.state.turnPhase === 'guess';
+    this.state.lastAction = `${player.nickname}: 시간초과로 추리 종료`;
+    this.broadcast('chat', {
+      clientId: 'System',
+      message: `⏱️ ${player.nickname}님의 추리 시간이 초과되어 턴을 종료합니다.`,
+    });
+    this.completeTurn(sessionId, revealPending);
   }
 
   private completeTurn(sessionId: string, revealPending: boolean) {
@@ -502,6 +596,7 @@ export class DavinciCodeRoom extends Room<DavinciCodeState> {
       this.eliminationOrder.filter((id) => id !== winnerSessionId),
     );
     this.state.gamePhase = 'finished';
+    this.turnDeadline?.clear();
     this.state.turnPhase = 'finished';
     this.state.winnerSessionId = winnerSessionId;
     this.state.currentTurnId = '';

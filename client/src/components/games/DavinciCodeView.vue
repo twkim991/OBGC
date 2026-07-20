@@ -6,6 +6,7 @@
         <h1>다빈치 코드</h1>
         <p>공개된 단서와 오름차순 배열을 기억해 상대의 숨은 숫자를 추리하세요.</p>
       </div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ phaseSummary.label }}</span>
         <strong>{{ phaseSummary.title }}</strong>
@@ -173,6 +174,7 @@ import DavinciCodeRow from './davinci-code/DavinciCodeRow.vue';
 import DavinciResultModal from './davinci-code/DavinciResultModal.vue';
 import DavinciTile from './davinci-code/DavinciTile.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 
 const props = defineProps({ gameConnection: { type: Object, required: true } });
 const emit = defineEmits(['move-to-game']);

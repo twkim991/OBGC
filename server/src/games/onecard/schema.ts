@@ -35,6 +35,7 @@ export class MapleOneCardState extends Schema {
   @type('string') hostSessionId: string = '';
   @type([OneCardCard]) discardPile = new ArraySchema<OneCardCard>();
   @type('string') currentTurnId: string = '';
+  @type('number') turnDeadlineAt: number = 0;
   @type('number') direction: number = 1;
   @type('string') gamePhase: string = 'waiting';
   @type('string') currentColor: string = '';

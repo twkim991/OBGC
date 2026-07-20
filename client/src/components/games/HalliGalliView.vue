@@ -6,6 +6,7 @@
         <h1>할리갈리</h1>
         <p>공개된 맨 위 카드에서 같은 과일이 정확히 5개면 누구보다 먼저 종을 누르세요.</p>
       </div>
+      <TurnTimer :deadline-at="state?.turnDeadlineAt || 0" :active="Boolean(state?.turnDeadlineAt)" :is-mine="isMyTurn" />
       <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
         <span>{{ turnGuide.label }}</span>
         <strong>{{ turnGuide.title }}</strong>
@@ -107,6 +108,7 @@ import { HALLI_GALLI_PROTOCOL } from '../../games/halli-galli/protocol';
 import { projectHalliGalliState } from '../../games/halli-galli/state';
 import ActionGuard from './shared/ActionGuard.vue';
 import GameActivityPanel from './shared/GameActivityPanel.vue';
+import TurnTimer from './shared/TurnTimer.vue';
 import HalliGalliBell from './halli-galli/HalliGalliBell.vue';
 import HalliGalliCard from './halli-galli/HalliGalliCard.vue';
 import HalliGalliResultModal from './halli-galli/HalliGalliResultModal.vue';
