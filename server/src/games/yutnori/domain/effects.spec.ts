@@ -15,6 +15,19 @@ describe('yutnori effects', () => {
     expect(resolveYutThrow(original, 'DOUBLE_CAST').throws).toEqual([3, 3]);
   });
 
+  it('ends a nak throw without creating a movement result', () => {
+    const nak = { name: '낙', steps: 0, weight: 20 };
+    expect(resolveYutThrow(nak)).toMatchObject({
+      throws: [],
+      keepsThrowing: false,
+    });
+    expect(resolveYutThrow(nak, 'DOUBLE_CAST')).toMatchObject({
+      throws: [],
+      consumeSkill: true,
+    });
+    expect(resolveYutThrow(nak, 'MO_MAGNET').result.name).toBe('모');
+  });
+
   it('resolves titan collisions without mutating state', () => {
     expect(resolveTitanCollision([2, 3, 4], [3], false)).toEqual({
       endPosition: 0,

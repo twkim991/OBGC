@@ -7,7 +7,7 @@
         <template v-if="isMyTurn"> · 낼 수 있는 카드 {{ playableCount }}장</template>
       </span>
     </div>
-    <div v-if="cards.length" class="hand-scroll">
+    <div v-if="cards.length" class="hand-grid">
       <ActionGuard
         v-for="card in cards"
         :key="card.id"
@@ -50,12 +50,13 @@ const playableCount = computed(() => props.cards.filter((card) => card.playable)
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .panel-heading h2 { margin: 0; font-size: 20px; }
 .panel-heading span { color: var(--color-muted); font-size: 13px; }
-.hand-scroll { display: flex; gap: var(--space-3); overflow-x: auto; padding: var(--space-2) var(--space-1) var(--space-3); scrollbar-width: thin; }
-.hand-scroll :deep(.action-guard) { flex: 0 0 138px; }
-.game-card { width: 138px; aspect-ratio: 2 / 3; display: flex; flex-direction: column; justify-content: space-between; padding: var(--space-3); border: 1px solid currentColor; border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-card); color: var(--color-ink); text-align: left; font-weight: 700; }
+.hand-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: clamp(6px, 1vw, var(--space-3)); padding: var(--space-2) var(--space-1) var(--space-3); }
+.hand-grid :deep(.action-guard) { width: 100%; }
+.game-card { width: 100%; min-width: 0; aspect-ratio: 2 / 3; display: flex; flex-direction: column; justify-content: space-between; padding: clamp(7px, 1vw, var(--space-3)); border: 1px solid currentColor; border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-card); color: var(--color-ink); text-align: left; font-weight: 700; }
 .game-card small { font-size: 11px; letter-spacing: .06em; }
-.game-card b { align-self: center; font-size: 28px; }
-.hand-card { flex: 0 0 118px; cursor: pointer; transition: translate 150ms cubic-bezier(.2,0,0,1), box-shadow 150ms cubic-bezier(.2,0,0,1); }
+.game-card b { align-self: center; font-size: clamp(20px, 2.2vw, 28px); }
+.game-card span { overflow-wrap: anywhere; font-size: clamp(10px, 1vw, 13px); }
+.hand-card { cursor: pointer; transition: translate 150ms cubic-bezier(.2,0,0,1), box-shadow 150ms cubic-bezier(.2,0,0,1); }
 .hand-card.playable:not(:disabled):hover { translate: 0 -6px; }
 .hand-card:disabled { cursor: not-allowed; filter: grayscale(.35); opacity: .44; box-shadow: none; }
 .color-red { color: var(--color-danger); background: color-mix(in oklab, var(--color-danger) 8%, white); }

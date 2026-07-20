@@ -1,4 +1,4 @@
-import { resolveCardEffect } from './effects';
+import { isBankruptHand, resolveCardEffect } from './effects';
 import type { Card } from './types';
 
 const card = (type: Card['type'], color: Card['color'] = 'red'): Card => ({
@@ -8,6 +8,12 @@ const card = (type: Card['type'], color: Card['color'] = 'red'): Card => ({
 });
 
 describe('one-card effects', () => {
+  it('declares bankruptcy as soon as a hand reaches 17 cards', () => {
+    expect(isBankruptHand(16)).toBe(false);
+    expect(isBankruptHand(17)).toBe(true);
+    expect(isBankruptHand(18)).toBe(true);
+  });
+
   it('keeps the turn for plus1 and two-player jump', () => {
     expect(
       resolveCardEffect({

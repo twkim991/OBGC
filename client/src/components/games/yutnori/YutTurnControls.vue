@@ -170,13 +170,23 @@ const skillBlockedReason = computed(() => {
   return '';
 });
 const throwChoiceBlockedReason = computed(() => props.gamePhase === 'moving' ? '' : '윷 결과는 말을 이동하는 단계에서 선택할 수 있습니다.');
-const pieceBlockedReason = (piece) => piece.position === 99 ? '이미 완주한 말은 다시 움직일 수 없습니다.' : '';
+const selectedSteps = computed(() => props.remainingThrows[props.selectedThrowIndex]);
+const pieceBlockedReason = (piece) => {
+  if (piece.position === 99) return '이미 완주한 말은 다시 움직일 수 없습니다.';
+  if (piece.position === 0 && selectedSteps.value < 0) {
+    return '스타트 위치의 말은 빽도로 움직일 수 없습니다.';
+  }
+  return '';
+};
 const moveBlockedReason = computed(() => {
   if (!props.remainingThrows.length) return '먼저 윷을 던져 이동 결과를 얻으세요.';
   if (!props.remainingThrows[props.selectedThrowIndex] && props.remainingThrows[props.selectedThrowIndex] !== 0) return '이동에 사용할 윷 결과를 선택하세요.';
   const piece = props.myPieces[props.selectedPieceIndex];
   if (!piece) return '움직일 말을 선택하세요.';
   if (piece.position === 99) return '선택한 말은 이미 완주했습니다. 다른 말을 선택하세요.';
+  if (piece.position === 0 && selectedSteps.value < 0) {
+    return '스타트 위치의 말에는 빽도를 사용할 수 없습니다.';
+  }
   return '';
 });
 </script>

@@ -1,3 +1,14 @@
+function projectCard(card) {
+  if (!card || typeof card !== 'object') return null;
+
+  return {
+    id: typeof card.id === 'string' ? card.id : '',
+    color: typeof card.color === 'string' ? card.color : '',
+    type: typeof card.type === 'string' ? card.type : '',
+    number: typeof card.number === 'number' ? card.number : 0,
+  };
+}
+
 export function projectOneCardState(state) {
   return {
     players: Object.fromEntries(
@@ -16,12 +27,7 @@ export function projectOneCardState(state) {
         },
       ])
     ),
-    discardPile: Array.from(state.discardPile ?? [], (card) => ({
-      id: card.id,
-      color: card.color,
-      type: card.type,
-      number: card.number,
-    })),
+    discardPile: Array.from(state.discardPile ?? [], projectCard).filter(Boolean),
     currentTurnId: state.currentTurnId,
     direction: state.direction,
     gamePhase: state.gamePhase,

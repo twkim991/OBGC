@@ -6,9 +6,18 @@
         <h1>메이플 원카드</h1>
       </div>
       <div class="topbar-actions">
-        <button class="sound-button" type="button" @click="toggleBgm">
-          {{ isBgmEnabled ? '배경음 끄기' : '배경음 켜기' }}
-        </button>
+        <label class="volume-control">
+          <span>배경음</span>
+          <input
+            v-model.number="bgmVolume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            aria-label="배경음 볼륨"
+          />
+          <output>{{ bgmVolumePercent }}%</output>
+        </label>
         <div class="turn-chip" :class="{ mine: isMyTurn }" role="status">
           <span>{{ turnGuide.label }}</span>
           <strong>{{ turnGuide.title }}</strong>
@@ -84,9 +93,10 @@
         </section>
       </main>
 
-      <GameActivityPanel
+      <GameChatPanel
         :messages="messages"
         note="공격이 누적되면 동급 이상의 공격 카드로 대응할 수 있습니다. 색상 선택 카드는 다음 진행 색상을 바꿉니다."
+        @send="sendMessage"
       />
     </div>
 
@@ -103,7 +113,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { showRoomErrorAlert } from '../../game-alerts';
 import ActionGuard from './shared/ActionGuard.vue';
-import GameActivityPanel from './shared/GameActivityPanel.vue';
+import GameChatPanel from './shared/GameChatPanel.vue';
 import OneCardColorPicker from './onecard/OneCardColorPicker.vue';
 import OneCardHandPanel from './onecard/OneCardHandPanel.vue';
 import OneCardPlayerPanel from './onecard/OneCardPlayerPanel.vue';
@@ -127,7 +137,7 @@ const pendingCard = ref(null);
 const showColorPicker = ref(false);
 const messages = ref([]);
 const audioRef = ref(null);
-const isBgmEnabled = ref(true);
+const bgmVolume = ref(0.4);
 const bgmError = ref('');
 
 let boundRoom = null;
@@ -182,6 +192,11 @@ const topCard = computed(() => {
 });
 
 const isMyTurn = computed(() => state.value?.currentTurnId === mySessionId.value);
+const bgmVolumePercent = computed(() => Math.round(bgmVolume.value * 100));
+
+watch(bgmVolume, (volume) => {
+  if (audioRef.value) audioRef.value.volume = volume;
+});
 
 const currentPlayerName = computed(() => {
   if (!state.value?.currentTurnId) return '-';
@@ -264,6 +279,10 @@ function returnToTable() {
   if (room.value) room.value.send(ONECARD_PROTOCOL.messages.returnToTable);
 }
 
+function sendMessage(message) {
+  if (message && room.value) room.value.send('chat', message);
+}
+
 function drawCard() {
   if (room.value) room.value.send(ONECARD_PROTOCOL.messages.drawCard);
 }
@@ -299,28 +318,14 @@ function cancelColorPicker() {
 }
 
 async function tryPlayBgm() {
-  if (!isBgmEnabled.value || !audioRef.value) return;
+  if (!audioRef.value) return;
 
   try {
     await audioRef.value.play();
     bgmError.value = '';
   } catch {
-    bgmError.value = '브라우저 정책으로 자동 재생이 차단될 수 있어요. 버튼을 한 번 더 눌러 주세요.';
+    bgmError.value = '브라우저 정책으로 자동 재생이 차단될 수 있어요. 화면을 한 번 누르면 배경음이 재생됩니다.';
   }
-}
-
-function toggleBgm() {
-  isBgmEnabled.value = !isBgmEnabled.value;
-  bgmError.value = '';
-  if (!audioRef.value) return;
-
-  if (isBgmEnabled.value) {
-    tryPlayBgm();
-    return;
-  }
-
-  audioRef.value.pause();
-  audioRef.value.currentTime = 0;
 }
 
 function onAudioLoadError() {
@@ -332,7 +337,10 @@ onMounted(() => {
   document.addEventListener('pointerdown', unlockAudio, { once: true });
   document.addEventListener('keydown', unlockAudio, { once: true });
 
-  if (audioRef.value) audioRef.value.addEventListener('error', onAudioLoadError);
+  if (audioRef.value) {
+    audioRef.value.volume = bgmVolume.value;
+    audioRef.value.addEventListener('error', onAudioLoadError);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -377,7 +385,6 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
 }
 
-.sound-button,
 .button {
   min-height: 44px;
   border: 1px solid transparent;
@@ -388,14 +395,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.sound-button,
 .button-secondary {
   border-color: var(--color-border);
   background: var(--color-surface);
   color: var(--color-ink-soft);
 }
 
-.sound-button:hover,
 .button-secondary:hover {
   background: var(--color-surface-muted);
 }
@@ -438,6 +443,33 @@ onBeforeUnmount(() => {
 
 .turn-chip.mine strong {
   color: color-mix(in oklab, var(--color-success), var(--color-ink) 38%);
+}
+
+.volume-control {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: auto minmax(90px, 130px) 38px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.volume-control input {
+  width: 100%;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.volume-control output {
+  color: var(--color-muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .game-layout {
@@ -638,7 +670,7 @@ onBeforeUnmount(() => {
     align-items: stretch;
   }
 
-  .sound-button,
+  .volume-control,
   .turn-chip {
     flex: 1;
   }

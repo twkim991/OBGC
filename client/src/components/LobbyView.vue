@@ -110,7 +110,7 @@
             <button
               type="button"
               class="join-button"
-              @click="joinRoom(room.roomId)"
+              @click="openJoinModal(room)"
               :disabled="room.clients >= room.maxClients"
               :aria-label="`${gameLabel(room.metadata?.gameType)} ${room.metadata?.roomName || '방 제목 없음'} 입장하기`"
             >
@@ -195,6 +195,53 @@
         </div>
       </form>
     </div>
+
+    <div
+      v-if="joinModalOpen"
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="join-room-title"
+      aria-describedby="join-room-description"
+      @click.self="closeJoinModal"
+    >
+      <form class="create-modal nickname-modal" :aria-busy="joinInProgress" @submit.prevent="joinRoom">
+        <div class="modal-header">
+          <div>
+            <h2 id="join-room-title">닉네임 설정</h2>
+            <p id="join-room-description">
+              <strong>{{ pendingJoinRoom?.metadata?.roomName || '선택한 방' }}</strong>에서 사용할 닉네임을 입력해주세요.
+            </p>
+          </div>
+          <button class="modal-close" type="button" aria-label="닫기" :disabled="joinInProgress" @click="closeJoinModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="join-room-summary">
+            <span>{{ gameLabel(pendingJoinRoom?.metadata?.gameType) }}</span>
+            <strong>{{ pendingJoinRoom?.clients ?? 0 }} / {{ pendingJoinRoom?.maxClients ?? 0 }}명 참여 중</strong>
+          </div>
+          <label class="modal-field">
+            <span>내 닉네임</span>
+            <input
+              ref="joinNicknameInput"
+              v-model="nickname"
+              maxlength="40"
+              autocomplete="nickname"
+              placeholder="닉네임을 입력하세요"
+              aria-required="true"
+              :disabled="joinInProgress"
+            />
+            <small class="field-help">입력한 닉네임은 다음 방을 만들거나 입장할 때도 사용됩니다.</small>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-cancel" type="button" :disabled="joinInProgress" @click="closeJoinModal">취소</button>
+          <button class="modal-submit" type="submit" :disabled="!nickname.trim() || joinInProgress">
+            {{ joinInProgress ? '입장 중…' : '닉네임 설정하고 입장' }}
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -224,6 +271,10 @@ const searchQuery = ref('');
 const roomSort = ref('available');
 const createModalOpen = ref(false);
 const roomTitleInput = ref(null);
+const joinModalOpen = ref(false);
+const pendingJoinRoom = ref(null);
+const joinNicknameInput = ref(null);
+const joinInProgress = ref(false);
 const lobbyError = ref('');
 const visibleRoomLimit = ref(100);
 let lobbyConnection = null;
@@ -355,13 +406,29 @@ const closeCreateModal = () => {
   createModalOpen.value = false;
 };
 
+const openJoinModal = async (room) => {
+  pendingJoinRoom.value = room;
+  joinModalOpen.value = true;
+  await nextTick();
+  joinNicknameInput.value?.focus();
+  joinNicknameInput.value?.select();
+};
+
+const closeJoinModal = () => {
+  if (joinInProgress.value) return;
+  joinModalOpen.value = false;
+  pendingJoinRoom.value = null;
+};
+
 defineExpose({ openCreateModal });
 
 const handleModalKeydown = (event) => {
-  if (event.key === 'Escape' && createModalOpen.value) closeCreateModal();
+  if (event.key !== 'Escape') return;
+  if (joinModalOpen.value) closeJoinModal();
+  else if (createModalOpen.value) closeCreateModal();
 };
 
-watch(createModalOpen, (isOpen) => {
+watch(() => createModalOpen.value || joinModalOpen.value, (isOpen) => {
   document.body.style.overflow = isOpen ? 'hidden' : '';
 });
 
@@ -469,13 +536,17 @@ const createRoom = async () => {
   }
 };
 
-const joinRoom = async (roomId) => {
-  if (!props.colyseusClient) return;
+const joinRoom = async () => {
+  const roomId = pendingJoinRoom.value?.roomId;
+  if (!props.colyseusClient || !roomId || joinInProgress.value) return;
   const playerIdentity = getPlayerIdentity();
   if (!playerIdentity) return;
+  joinInProgress.value = true;
   try {
     lobbyError.value = '';
     const connection = await props.colyseusClient.joinById(roomId, playerIdentity);
+    joinModalOpen.value = false;
+    pendingJoinRoom.value = null;
     emit('join-table', connection);
   } catch (e) {
     console.error('방 입장 에러:', e);
@@ -485,6 +556,8 @@ const joinRoom = async (roomId) => {
       primaryLabel: '다른 테이블 보기',
       dismissible: true,
     });
+  } finally {
+    joinInProgress.value = false;
   }
 };
 </script>

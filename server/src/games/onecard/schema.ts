@@ -1,11 +1,20 @@
 import { ArraySchema, MapSchema, Schema, type } from '@colyseus/schema';
-import type { CardColor, CardType } from './domain/types';
+import type { Card, CardColor, CardType } from './domain/types';
 
 export class OneCardCard extends Schema {
   @type('string') id: string = '';
   @type('string') color: CardColor = 'red';
   @type('string') type: CardType = 'number';
   @type('number') number: number = 0;
+}
+
+export function toOneCardSchemaCard(source: Card): OneCardCard {
+  const card = new OneCardCard();
+  card.id = source.id;
+  card.color = source.color;
+  card.type = source.type;
+  card.number = source.number ?? 0;
+  return card;
 }
 
 export class OneCardPlayer extends Schema {

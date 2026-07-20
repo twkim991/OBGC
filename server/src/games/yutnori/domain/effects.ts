@@ -20,6 +20,16 @@ export function resolveYutThrow(
 
   if (activeSkill === 'MO_MAGNET') notices.push('mo_magnet');
 
+  if (result.name === '낙') {
+    return {
+      result,
+      throws: [],
+      consumeSkill: Boolean(activeSkill && activeSkill !== 'STEALTH_MODE'),
+      keepsThrowing: false,
+      notices,
+    };
+  }
+
   let steps = result.steps;
   if (activeSkill === 'BACK_GEAR') {
     steps = steps > 0 ? -steps : Math.abs(steps);

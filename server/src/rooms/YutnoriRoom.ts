@@ -13,7 +13,11 @@ import {
   MIGRATION_SEAT_SECONDS,
   type MigrationParticipant,
 } from '../games/migration';
-import { traceYutMove } from '../games/yutnori/domain/board';
+import {
+  canMoveYutPiece,
+  isBackwardThrowNak,
+  traceYutMove,
+} from '../games/yutnori/domain/board';
 import { getNextPlayerId } from '../games/yutnori/domain/engine';
 import {
   getEmptyTitanNodes,
@@ -121,7 +125,15 @@ export class YutnoriRoom extends Room<YutnoriState> {
       if (!player) return;
       const activeSkill = player.activeSkill;
       const resolution = resolveYutThrow(throwYut(), activeSkill);
-      this.state.remainingThrows.push(...resolution.throws);
+      const isNak = resolution.result.name === '낙';
+      const backwardNak =
+        resolution.throws.length > 0 &&
+        resolution.throws.every((steps) =>
+          isBackwardThrowNak(Array.from(player.pieces), steps),
+        );
+      if (!isNak && !backwardNak) {
+        this.state.remainingThrows.push(...resolution.throws);
+      }
 
       resolution.notices.forEach((notice) => {
         const messages = {
@@ -143,7 +155,16 @@ export class YutnoriRoom extends Room<YutnoriState> {
 
       let message = `🎲 ${player.nickname}님이 [${resolution.result.name}]를 던졌습니다!`;
 
-      if (resolution.keepsThrowing) {
+      if (isNak || backwardNak) {
+        this.state.remainingThrows.clear();
+        this.state.gamePhase = 'throwing';
+        message += backwardNak
+          ? ' 움직일 수 있는 말이 없어 낙으로 처리됩니다.'
+          : ' 윷가락이 판 밖으로 나가 낙으로 처리됩니다.';
+        this.broadcast('chat', { clientId: 'System', message });
+        this.passTurn();
+        return;
+      } else if (resolution.keepsThrowing) {
         message += ' 한 번 더 던지세요!! 🔥';
       } else {
         message += ' 이동할 말과 사용할 윷을 선택하세요.';
@@ -179,6 +200,14 @@ export class YutnoriRoom extends Room<YutnoriState> {
       }
       if (steps === undefined) {
         this.rejectRequest(client, 'INVALID_THROW', '사용할 수 없는 윷 결과입니다.');
+        return;
+      }
+      if (!canMoveYutPiece(targetPiece.position, steps)) {
+        this.rejectRequest(
+          client,
+          'INVALID_BACK_DO_MOVE',
+          '스타트 위치의 말은 빽도로 움직일 수 없습니다.',
+        );
         return;
       }
 

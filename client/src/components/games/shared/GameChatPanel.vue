@@ -11,6 +11,7 @@
         <span>{{ message.message }}</span>
       </p>
     </div>
+    <p v-if="note" class="rule-note">{{ note }}</p>
     <form class="chat-form" @submit.prevent="submit">
       <input v-model="draft" maxlength="300" aria-label="채팅 메시지" placeholder="메시지를 입력하세요" />
       <button type="submit">전송</button>
@@ -21,7 +22,10 @@
 <script setup>
 import { nextTick, ref, watch } from 'vue';
 
-const props = defineProps({ messages: { type: Array, required: true } });
+const props = defineProps({
+  messages: { type: Array, required: true },
+  note: { type: String, default: '' },
+});
 const emit = defineEmits(['send']);
 const draft = ref('');
 const chatLog = ref(null);
@@ -78,6 +82,15 @@ function submit() {
 }
 
 .message-row strong.system { color: var(--color-primary); }
+
+.rule-note {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border-soft);
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
 
 .chat-form {
   display: grid;

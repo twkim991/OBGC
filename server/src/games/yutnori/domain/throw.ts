@@ -5,12 +5,13 @@ export interface YutThrow {
 }
 
 const THROW_OPTIONS: YutThrow[] = [
-  { name: '개', steps: 2, weight: 345 },
-  { name: '걸', steps: 3, weight: 345 },
-  { name: '윷', steps: 4, weight: 130 },
-  { name: '도', steps: 1, weight: 115 },
-  { name: '빽도', steps: -1, weight: 38 },
+  { name: '개', steps: 2, weight: 338 },
+  { name: '걸', steps: 3, weight: 338 },
+  { name: '윷', steps: 4, weight: 127 },
+  { name: '도', steps: 1, weight: 113 },
+  { name: '빽도', steps: -1, weight: 37 },
   { name: '모', steps: 5, weight: 27 },
+  { name: '낙', steps: 0, weight: 20 },
 ];
 
 export function throwYut(random = Math.random): YutThrow {

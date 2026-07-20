@@ -10,11 +10,28 @@ const FAST_NODE: Record<number, number> = { 5: 20, 10: 25, 22: 27 };
 const PREVIOUS_NODE: Record<number, number> = {
   1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8,
   10: 9, 11: 10, 12: 11, 13: 12, 14: 13, 15: 14, 16: 15,
-  17: 16, 18: 17, 19: 18, 0: 19, 20: 5, 21: 20, 25: 10,
+  17: 16, 18: 17, 19: 18, 20: 5, 21: 20, 25: 10,
   26: 25, 22: 21, 27: 22, 28: 27, 23: 22, 24: 23,
 };
 
+export function canMoveYutPiece(position: number, steps: number): boolean {
+  return position !== 99 && !(position === 0 && steps < 0);
+}
+
+export function isBackwardThrowNak(
+  pieces: Array<{ position: number }>,
+  steps: number,
+): boolean {
+  return (
+    steps < 0 &&
+    pieces.some((piece) => piece.position === 0) &&
+    pieces.every((piece) => piece.position === 0 || piece.position === 99)
+  );
+}
+
 export function traceYutMove(startPosition: number, steps: number): number[] {
+  if (!canMoveYutPiece(startPosition, steps)) return [];
+
   const path: number[] = [];
   let current = startPosition;
   let previous = startPosition;

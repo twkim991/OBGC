@@ -32,6 +32,7 @@ import {
   MapleOneCardState,
   OneCardCard,
   OneCardPlayer,
+  toOneCardSchemaCard,
 } from '../games/onecard/schema';
 import {
   ONECARD_MESSAGES,
@@ -49,17 +50,13 @@ import {
 } from '../games/onecard/domain/rules';
 import type { Card } from '../games/onecard/domain/types';
 
-function toSchemaCard(source: Card): OneCardCard {
-  const card = new OneCardCard();
-  card.id = source.id;
-  card.color = source.color;
-  card.type = source.type;
-  card.number = source.number ?? 0;
-  return card;
-}
-
-function createSchemaDeck(): OneCardCard[] {
-  return createOneCardDeck().map(toSchemaCard);
+function toDomainCard(source: Card): Card {
+  return {
+    id: source.id,
+    color: source.color,
+    type: source.type,
+    number: source.number,
+  };
 }
 
 function getTopCard(state: MapleOneCardState): OneCardCard | null {
@@ -69,8 +66,8 @@ function getTopCard(state: MapleOneCardState): OneCardCard | null {
 
 export class MapleOneCardRoom extends Room<MapleOneCardState> {
   private isReturning = false;
-  private deck: OneCardCard[] = [];
-  private readonly hands = new Map<string, OneCardCard[]>();
+  private deck: Card[] = [];
+  private readonly hands = new Map<string, Card[]>();
   private readonly playerIds = new Map<string, string>();
   private readonly chatLimiter = new SlidingWindowRateLimiter(5, 5000);
   private readonly clientProtocols = new Map<string, Record<string, number>>();
@@ -177,7 +174,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
         // 이카르트는 discardPile에 남지 않음
         if (card.type !== 'ikart') {
-          this.state.discardPile.push(card);
+          this.state.discardPile.push(toOneCardSchemaCard(card));
         }
 
         this.applyCardEffect(player, card, chosenColor, topBefore);
@@ -394,7 +391,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     this.state.gamePhase = 'playing';
 
     const ids = Array.from(this.state.players.keys());
-    const deal = dealOneCardGame(createSchemaDeck(), ids, 7, shuffle);
+    const deal = dealOneCardGame(createOneCardDeck(), ids, 7, shuffle);
 
     this.state.players.forEach((player) => {
       player.alive = true;
@@ -408,7 +405,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     });
 
     if (deal.firstCard) {
-      this.state.discardPile.push(deal.firstCard);
+      this.state.discardPile.push(toOneCardSchemaCard(deal.firstCard));
       this.state.currentColor =
         deal.firstCard.color === 'purple' ? '' : deal.firstCard.color;
     } else {
@@ -437,9 +434,9 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
   // --- 카드 효과 적용 ---
   private applyCardEffect(
     player: OneCardPlayer,
-    card: OneCardCard,
+    card: Card,
     chosenColor?: string,
-    topBefore?: OneCardCard | null,
+    topBefore?: Card | null,
   ) {
     const playerName = player.nickname;
     const effect = resolveCardEffect({
@@ -545,8 +542,10 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     if (refill.refillCards.length === 0) return;
 
     this.state.discardPile.clear();
-    if (refill.topCard) this.state.discardPile.push(refill.topCard);
-    this.deck.push(...refill.refillCards);
+    if (refill.topCard) {
+      this.state.discardPile.push(toOneCardSchemaCard(refill.topCard));
+    }
+    this.deck.push(...refill.refillCards.map(toDomainCard));
   }
 
   // --- 턴 처리 ---
@@ -594,7 +593,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
       this.broadcast('chat', {
         clientId: 'System',
-        message: `💀 ${player.nickname}님이 손패 18장 이상으로 파산했습니다.`,
+        message: `💀 ${player.nickname}님이 손패 17장이 되어 파산했습니다.`,
       });
     }
   }
@@ -648,7 +647,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
   }
 
   // --- 기타 ---
-  private formatCard(card: OneCardCard | null | undefined) {
+  private formatCard(card: Card | null | undefined) {
     if (!card) return '없음';
     if (card.type === 'number') return `${card.color} ${card.number}`;
     return `${card.color} ${card.type}`;
@@ -656,7 +655,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
 
   private cardEffectMessage(
     playerName: string,
-    card: OneCardCard,
+    card: Card,
     effect: OneCardEffect,
   ) {
     switch (card.type) {
@@ -728,7 +727,7 @@ export class MapleOneCardRoom extends Room<MapleOneCardState> {
     sendRoomError(client, code, message);
   }
 
-  private getHand(player: OneCardPlayer): OneCardCard[] {
+  private getHand(player: OneCardPlayer): Card[] {
     return this.hands.get(player.sessionId) ?? [];
   }
 

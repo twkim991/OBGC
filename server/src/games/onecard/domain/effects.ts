@@ -160,6 +160,6 @@ export function prepareDiscardRefill<T>(
   };
 }
 
-export function isBankruptHand(handCount: number, maximum = 17): boolean {
-  return handCount > maximum;
+export function isBankruptHand(handCount: number, limit = 17): boolean {
+  return handCount >= limit;
 }
